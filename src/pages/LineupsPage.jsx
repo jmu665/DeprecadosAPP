@@ -1,0 +1,300 @@
+import React, { useState, useRef } from 'react'
+import { useData, POSITIONS } from '../utils/DataContext'
+import BaseballField from '../components/BaseballField'
+import Modal from '../components/Modal'
+import { Plus, Trash2, Printer, Eye, CalendarDays, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
+
+export default function LineupsPage() {
+    const { players, lineups, addLineup, updateLineup, deleteLineup, getPlayer } = useData()
+    const [expandedId, setExpandedId] = useState(null)
+    const [confirmDelete, setConfirmDelete] = useState(null)
+    const [showCreateModal, setShowCreateModal] = useState(false)
+    const [newLineup, setNewLineup] = useState({ name: '', date: new Date().toISOString().split('T')[0], opponent: '' })
+    const printRef = useRef()
+
+    const handleCreate = () => {
+        addLineup({
+            ...newLineup,
+            name: newLineup.name || `Lineup ${lineups.length + 1}`,
+        })
+        setShowCreateModal(false)
+        setNewLineup({ name: '', date: new Date().toISOString().split('T')[0], opponent: '' })
+    }
+
+    const handlePrint = (lineup) => {
+        const printWindow = window.open('', '_blank')
+        const positionsList = Object.entries(lineup.positions).map(([posId, playerId]) => {
+            const player = getPlayer(playerId)
+            const posInfo = POSITIONS.find(p => p.id === posId)
+            return { position: posInfo?.label || posId, short: posInfo?.short || posId, player }
+        })
+
+        const battingOrderList = lineup.battingOrder.map((playerId, idx) => {
+            const player = getPlayer(playerId)
+            return { order: idx + 1, player }
+        })
+
+        printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Lineup - ${lineup.name}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Arial', sans-serif; padding: 30px; background: white; color: #111; }
+          .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #DC2626; padding-bottom: 20px; }
+          .header h1 { font-size: 28px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; }
+          .header .meta { color: #666; margin-top: 8px; font-size: 14px; }
+          .section { margin-bottom: 24px; }
+          .section h2 { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; color: #DC2626; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
+          th { background: #f5f5f5; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; color: #666; }
+          .number { font-weight: 800; color: #DC2626; font-size: 16px; }
+          .footer { text-align: center; margin-top: 40px; color: #999; font-size: 11px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <img src="${window.location.origin}/logo.png" alt="Logo" style="height: 60px; object-fit: contain; margin-bottom: 15px;" />
+          <h1>Deprecados</h1>
+          <div class="meta">
+            <strong>${lineup.name}</strong><br/>
+            ${lineup.date} ${lineup.opponent ? `| vs ${lineup.opponent}` : ''}
+          </div>
+        </div>
+        <div class="section">
+          <h2>Alineación de Campo</h2>
+          <table>
+            <thead><tr><th>Pos</th><th>#</th><th>Jugador</th></tr></thead>
+            <tbody>
+              ${positionsList.map(({ short, player }) => `
+                <tr>
+                  <td><strong>${short}</strong></td>
+                  <td class="number">${player?.number || '-'}</td>
+                  <td>${player?.name || 'Vacante'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${battingOrderList.length > 0 ? `
+        <div class="section">
+          <h2>Orden al Bat</h2>
+          <table>
+            <thead><tr><th>#</th><th>Num</th><th>Jugador</th></tr></thead>
+            <tbody>
+              ${battingOrderList.map(({ order, player }) => `
+                <tr>
+                  <td><strong>${order}</strong></td>
+                  <td class="number">${player?.number || '-'}</td>
+                  <td>${player?.name || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+        <div class="footer">Generado por DeprecadosAPP</div>
+      </body>
+      </html>
+    `)
+        printWindow.document.close()
+        setTimeout(() => printWindow.print(), 300)
+    }
+
+    return (
+        <div className="animate-fade-in">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                <div>
+                    <h1 className="text-2xl font-black tracking-tight">Alineaciones</h1>
+                    <p className="text-text-muted text-sm mt-1">{lineups.length} alineaciones guardadas</p>
+                </div>
+                <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="btn-primary flex items-center gap-2 w-fit"
+                >
+                    <Plus size={18} />
+                    Nueva Alineación
+                </button>
+            </div>
+
+            {lineups.length === 0 ? (
+                <div className="glass-card p-12 text-center">
+                    <CalendarDays size={48} className="mx-auto mb-4 text-text-muted/30" />
+                    <p className="text-text-muted font-medium">
+                        No hay alineaciones guardadas. Crea una desde el Campo o usa el botón de arriba.
+                    </p>
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    {[...lineups].reverse().map((lineup, i) => {
+                        const isExpanded = expandedId === lineup.id
+                        const assignedCount = Object.keys(lineup.positions).length
+
+                        return (
+                            <div
+                                key={lineup.id}
+                                className="glass-card overflow-hidden animate-slide-up"
+                                style={{ animationDelay: `${i * 50}ms` }}
+                            >
+                                {/* Lineup header */}
+                                <div
+                                    className="p-5 flex items-center gap-4 cursor-pointer"
+                                    onClick={() => setExpandedId(isExpanded ? null : lineup.id)}
+                                >
+                                    <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
+                                        <CalendarDays size={20} className="text-primary" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="font-bold text-white truncate">{lineup.name || 'Sin nombre'}</h3>
+                                        <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
+                                            <span>{lineup.date}</span>
+                                            {lineup.opponent && <span>vs {lineup.opponent}</span>}
+                                            <span className={`px-2 py-0.5 rounded-full ${assignedCount === 9 ? 'bg-green-500/15 text-green-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
+                                                {assignedCount}/9
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handlePrint(lineup) }}
+                                            className="p-2 rounded-lg text-text-muted hover:text-white hover:bg-white/10 transition-colors"
+                                            title="Imprimir"
+                                        >
+                                            <Printer size={16} />
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setConfirmDelete(lineup.id) }}
+                                            className="p-2 rounded-lg text-text-muted hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                            title="Eliminar"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                        {isExpanded ? <ChevronUp size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
+                                    </div>
+                                </div>
+
+                                {/* Expanded content */}
+                                {isExpanded && (
+                                    <div className="px-5 pb-5 border-t border-white/5 pt-5">
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            {/* Mini field */}
+                                            <div className="max-w-sm mx-auto">
+                                                <BaseballField positions={lineup.positions} interactive={false} />
+                                            </div>
+
+                                            {/* Position list */}
+                                            <div>
+                                                <h4 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-3">Alineación</h4>
+                                                <div className="space-y-2">
+                                                    {POSITIONS.filter(p => p.id !== 'DH').map(pos => {
+                                                        const playerId = lineup.positions[pos.id]
+                                                        const player = playerId ? getPlayer(playerId) : null
+                                                        return (
+                                                            <div key={pos.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/3">
+                                                                <span className="w-8 text-xs font-bold text-primary">{pos.short}</span>
+                                                                <span className="text-sm text-white flex-1">
+                                                                    {player ? `#${player.number || '?'} ${player.name}` : '—'}
+                                                                </span>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+
+                                                {/* Batting order */}
+                                                {lineup.battingOrder?.length > 0 && (
+                                                    <div className="mt-6">
+                                                        <h4 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-3">Orden al Bat</h4>
+                                                        <div className="space-y-2">
+                                                            {lineup.battingOrder.map((playerId, idx) => {
+                                                                const player = getPlayer(playerId)
+                                                                return (
+                                                                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white/3">
+                                                                        <span className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-xs font-bold text-primary">
+                                                                            {idx + 1}
+                                                                        </span>
+                                                                        <span className="text-sm text-white">
+                                                                            {player ? `#${player.number || '?'} ${player.name}` : '—'}
+                                                                        </span>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
+
+            {/* Create modal */}
+            <Modal
+                isOpen={showCreateModal}
+                onClose={() => setShowCreateModal(false)}
+                title="Nueva Alineación"
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Nombre</label>
+                        <input
+                            type="text"
+                            value={newLineup.name}
+                            onChange={e => setNewLineup(prev => ({ ...prev, name: e.target.value }))}
+                            className="input-field"
+                            placeholder="Ej: Jornada 5"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Fecha</label>
+                        <input
+                            type="date"
+                            value={newLineup.date}
+                            onChange={e => setNewLineup(prev => ({ ...prev, date: e.target.value }))}
+                            className="input-field"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Rival</label>
+                        <input
+                            type="text"
+                            value={newLineup.opponent}
+                            onChange={e => setNewLineup(prev => ({ ...prev, opponent: e.target.value }))}
+                            className="input-field"
+                            placeholder="Nombre del equipo rival"
+                        />
+                    </div>
+                    <div className="flex gap-3 pt-2">
+                        <button onClick={handleCreate} className="btn-primary flex-1">Crear</button>
+                        <button onClick={() => setShowCreateModal(false)} className="btn-secondary">Cancelar</button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Delete confirmation */}
+            <Modal
+                isOpen={!!confirmDelete}
+                onClose={() => setConfirmDelete(null)}
+                title="Eliminar Alineación"
+            >
+                <p className="text-text-muted mb-6">
+                    ¿Estás seguro de que quieres eliminar esta alineación?
+                </p>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => { deleteLineup(confirmDelete); setConfirmDelete(null) }}
+                        className="btn-primary flex-1 !bg-red-600 hover:!bg-red-700"
+                    >
+                        Eliminar
+                    </button>
+                    <button onClick={() => setConfirmDelete(null)} className="btn-secondary">Cancelar</button>
+                </div>
+            </Modal>
+        </div>
+    )
+}
