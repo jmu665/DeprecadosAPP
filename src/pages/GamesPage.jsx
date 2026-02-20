@@ -25,6 +25,7 @@ export default function GamesPage() {
         notes: '',
     })
     const [battingOrderDraft, setBattingOrderDraft] = useState([])
+    const [positionsDraft, setPositionsDraft] = useState({})
     const [gameStep, setGameStep] = useState(1) // 1=info, 2=batting order
 
     const availableForBatting = players.filter(p => !battingOrderDraft.includes(p.id))
@@ -34,21 +35,33 @@ export default function GamesPage() {
         addGame({
             ...newGameForm,
             battingOrder: battingOrderDraft,
+            positions: positionsDraft,
             runsFor: 0,
             runsAgainst: 0,
         })
         setNewGameForm({ date: new Date().toISOString().split('T')[0], opponent: '', innings: 7, notes: '' })
         setBattingOrderDraft([])
+        setPositionsDraft({})
         setGameStep(1)
         setShowNewGame(false)
     }
 
     const addToBattingOrder = (playerId) => {
         setBattingOrderDraft(prev => [...prev, playerId])
+        setPositionsDraft(prev => ({ ...prev, [playerId]: players.find(p => p.id === playerId)?.position || 'P' }))
     }
 
     const removeFromBattingOrder = (index) => {
-        setBattingOrderDraft(prev => prev.filter((_, i) => i !== index))
+        setBattingOrderDraft(prev => {
+            const arr = [...prev]
+            const idRemoved = arr.splice(index, 1)[0]
+            setPositionsDraft(pos => {
+                const newPos = { ...pos }
+                delete newPos[idRemoved]
+                return newPos
+            })
+            return arr
+        })
     }
 
     const moveBatter = (index, direction) => {
@@ -63,12 +76,26 @@ export default function GamesPage() {
 
     const handleStellarLineup = () => {
         const sorted = [...players].sort((a, b) => calcPlayerAvg(b) - calcPlayerAvg(a))
-        setBattingOrderDraft(sorted.slice(0, 9).map(p => p.id))
+        const draftIds = sorted.slice(0, 9).map(p => p.id)
+        setBattingOrderDraft(draftIds)
+
+        const posDraft = {}
+        draftIds.forEach(id => {
+            posDraft[id] = players.find(p => p.id === id)?.position || 'P'
+        })
+        setPositionsDraft(posDraft)
     }
 
     const handleEveryoneLineup = () => {
         const sorted = [...players].sort((a, b) => (a.stats?.atBats || 0) - (b.stats?.atBats || 0))
-        setBattingOrderDraft(sorted.map(p => p.id))
+        const draftIds = sorted.map(p => p.id)
+        setBattingOrderDraft(draftIds)
+
+        const posDraft = {}
+        draftIds.forEach(id => {
+            posDraft[id] = players.find(p => p.id === id)?.position || 'P'
+        })
+        setPositionsDraft(posDraft)
     }
 
     // ===== GAME EVENT HANDLERS =====
@@ -576,14 +603,14 @@ export default function GamesPage() {
                                                                 >
                                                                     <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black bg-blue-500/15 text-blue-300"
                                                                         style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                                                                        {posInfo?.short || '?'}
+                                                                        {game.positions?.[pId] || posInfo?.short || '?'}
                                                                     </div>
                                                                     <div className="flex-1 min-w-0">
                                                                         <div className="text-sm font-medium text-white truncate">
                                                                             #{player.number} {player.name}
                                                                         </div>
                                                                         <div className="text-[10px] text-text-muted">
-                                                                            {posInfo?.label || 'Sin posición'}
+                                                                            {posInfo?.label || (game.positions?.[pId] || 'Sin posición')}
                                                                             {gameErrors > 0 && (
                                                                                 <span className="text-red-400 font-bold ml-2">
                                                                                     {gameErrors} E en este juego
@@ -718,17 +745,19 @@ export default function GamesPage() {
                                             </div>
                                         </div>
                                     </div>
-                                )}
+                                )
+                                }
                             </div>
                         )
                     })}
                 </div>
-            )}
+            )
+            }
 
             {/* ===== NEW GAME MODAL ===== */}
             <Modal
                 isOpen={showNewGame}
-                onClose={() => { setShowNewGame(false); setGameStep(1); setBattingOrderDraft([]) }}
+                onClose={() => { setShowNewGame(false); setGameStep(1); setBattingOrderDraft([]); setPositionsDraft({}) }}
                 title={gameStep === 1 ? 'Nueva Jornada' : 'Orden al Bat'}
             >
                 {gameStep === 1 ? (
@@ -796,8 +825,20 @@ export default function GamesPage() {
                                                 <span className="flex-1 text-sm font-medium text-white truncate">
                                                     #{player.number} {player.name}
                                                 </span>
-                                                <span className="text-[10px] text-text-muted">{player.position}</span>
-                                                <button onClick={() => moveBatter(idx, -1)} disabled={idx === 0} className="p-0.5 text-text-muted hover:text-white disabled:opacity-20">
+                                                <select
+                                                    value={positionsDraft[pId] || player.position || ''}
+                                                    onChange={e => setPositionsDraft(prev => ({ ...prev, [pId]: e.target.value }))}
+                                                    className="bg-white/5 text-[10px] text-primary border border-primary/20 rounded font-bold outline-none cursor-pointer py-1 px-1 appearance-none text-center hover:bg-white/10"
+                                                >
+                                                    {POSITIONS.map(pos => (
+                                                        <option key={pos.id} value={pos.id} className="bg-surface text-white">
+                                                            {pos.short}
+                                                        </option>
+                                                    ))}
+                                                    <option value="BD" className="bg-surface text-white">BD</option>
+                                                    <option value="Banca" className="bg-surface text-white">Banca</option>
+                                                </select>
+                                                <button onClick={() => moveBatter(idx, -1)} disabled={idx === 0} className="p-0.5 ml-1 text-text-muted hover:text-white disabled:opacity-20">
                                                     <ArrowUp size={14} />
                                                 </button>
                                                 <button onClick={() => moveBatter(idx, 1)} disabled={idx === battingOrderDraft.length - 1} className="p-0.5 text-text-muted hover:text-white disabled:opacity-20">
@@ -892,6 +933,6 @@ export default function GamesPage() {
                     <button onClick={() => setDeleteConfirm(null)} className="btn-secondary">Cancelar</button>
                 </div>
             </Modal>
-        </div>
+        </div >
     )
 }
