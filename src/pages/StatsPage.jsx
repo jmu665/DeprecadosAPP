@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useData, POSITIONS, calcPlayerAvg, formatAvg } from '../utils/DataContext'
+import { useData, POSITIONS, calcPlayerAvg, formatAvg, calcPlayerStars, StarRating } from '../utils/DataContext'
 import Modal from '../components/Modal'
 import { BarChart3, Edit2, TrendingUp, Award, Target, Zap, RefreshCw, Database } from 'lucide-react'
 
@@ -274,6 +274,7 @@ export default function StatsPage() {
                                     <StatTooltipHeader label="E" tooltip={TABLE_TOOLTIPS['E']} />
                                     <StatTooltipHeader label="AVG" tooltip={TABLE_TOOLTIPS['AVG']} isPrimary />
                                     <StatTooltipHeader label="OBP" tooltip={TABLE_TOOLTIPS['OBP']} isPrimary />
+                                    <th className="text-center p-4 text-xs font-bold text-text-muted uppercase tracking-wider">Rating</th>
                                     <th className="text-center p-4"></th>
                                 </tr>
                             </thead>
@@ -309,6 +310,7 @@ export default function StatsPage() {
                                         <td className="text-center p-4 text-text-muted">{player.stats.errors}</td>
                                         <td className="text-center p-4 font-bold text-primary">{formatAvg(player.avg)}</td>
                                         <td className="text-center p-4 font-medium text-primary/80">{calcOBP(player.stats.hits, player.stats.walks, player.stats.atBats)}</td>
+                                        <td className="text-center p-4"><StarRating stars={calcPlayerStars(player)} size={13} /></td>
                                         <td className="text-center p-4">
                                             <button
                                                 onClick={() => handleEditStats(player)}

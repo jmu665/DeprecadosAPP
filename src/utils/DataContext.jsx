@@ -81,6 +81,60 @@ export function formatAvg(val) {
     return val.toFixed(3).replace(/^0/, '')
 }
 
+// Calculate composite score for star rating (1-5 stars)
+export function calcPlayerScore(player) {
+    const s = player?.stats || {}
+    const ab = s.atBats || 0
+    const hits = s.hits || 0
+    const walks = s.walks || 0
+    const doubles = s.doubles || 0
+    const triples = s.triples || 0
+    const hr = s.homeRuns || 0
+    const singles = hits - doubles - triples - hr
+    const pa = ab + walks
+    const avg = ab > 0 ? hits / ab : 0
+    const obp = pa > 0 ? (hits + walks) / pa : 0
+    const slg = ab > 0 ? (singles + doubles * 2 + triples * 3 + hr * 4) / ab : 0
+    return avg * 0.4 + obp * 0.3 + slg * 0.3
+}
+
+export function calcPlayerStars(player) {
+    const s = player?.stats || {}
+    const ab = s.atBats || 0
+    if (ab < 1) return 0 // No stars if no at-bats yet
+
+    const score = calcPlayerScore(player)
+
+    // Thresholds based on recreational/amateur baseball:
+    // .400+ composite = 5 stars (elite)
+    // .300-.399 = 4 stars (great)
+    // .200-.299 = 3 stars (average)
+    // .100-.199 = 2 stars (below average)
+    // <.100 = 1 star
+    if (score >= 0.400) return 5
+    if (score >= 0.300) return 4
+    if (score >= 0.200) return 3
+    if (score >= 0.100) return 2
+    return 1
+}
+
+export function StarRating({ stars, size = 14 }) {
+    if (stars === 0) return <span className="text-[10px] text-text-muted italic">Sin datos</span>
+    return (
+        <span className="inline-flex gap-0.5" title={`${stars}/5 estrellas`}>
+            {[1, 2, 3, 4, 5].map(i => (
+                <span
+                    key={i}
+                    style={{ fontSize: size }}
+                    className={i <= stars ? 'text-yellow-400' : 'text-white/10'}
+                >
+                    ★
+                </span>
+            ))}
+        </span>
+    )
+}
+
 export function DataProvider({ children }) {
     const [players, setPlayers] = useState([])
     const [lineups, setLineups] = useState([])

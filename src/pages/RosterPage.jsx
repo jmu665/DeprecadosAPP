@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useData, POSITIONS, calcPlayerAvg, formatAvg } from '../utils/DataContext'
+import { useData, POSITIONS, calcPlayerAvg, formatAvg, calcPlayerStars, StarRating } from '../utils/DataContext'
 import Modal from '../components/Modal'
 import PlayerForm from '../components/PlayerForm'
 import { Plus, Search, Edit2, Trash2, User, Phone, TrendingUp } from 'lucide-react'
@@ -141,6 +141,9 @@ export default function RosterPage() {
                                                     ({player.stats.hits}/{player.stats.atBats})
                                                 </span>
                                             )}
+                                        </div>
+                                        <div className="mt-1">
+                                            <StarRating stars={calcPlayerStars(player)} size={16} />
                                         </div>
                                         {player.phone && (
                                             <div className="flex items-center gap-1 mt-1.5 text-xs text-text-muted">
