@@ -4,7 +4,7 @@ import Modal from '../components/Modal'
 import { Plus, Trash2, Clock, ChevronDown, ChevronUp, Calendar, Shield, Swords, X, Users, ArrowUp, ArrowDown, Lightbulb, Crown } from 'lucide-react'
 
 export default function GamesPage() {
-    const { players, games, lineups, addGame, updateGame, deleteGame, addGameEvent, deleteGameEvent, getPlayer } = useData()
+    const { players, games, lineups, addGame, updateGame, deleteGame, addGameEvent, deleteGameEvent, getPlayer, addLineup } = useData()
     const [expandedGame, setExpandedGame] = useState(null)
     const [showNewGame, setShowNewGame] = useState(false)
     const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -30,12 +30,29 @@ export default function GamesPage() {
 
     const availableForBatting = players.filter(p => !battingOrderDraft.includes(p.id))
 
-    const handleCreateGame = () => {
+    const handleCreateGame = async () => {
         if (battingOrderDraft.length < 1) return
-        addGame({
+
+        // Also save as a Lineup in the DB
+        const lineupPositions = {}
+        battingOrderDraft.forEach(pId => {
+            const pos = positionsDraft[pId] || players.find(p => p.id === pId)?.position || 'P'
+            // Map player to their game position  
+            lineupPositions[pos] = lineupPositions[pos] ? lineupPositions[pos] : pId
+        })
+        await addLineup({
+            name: newGameForm.opponent ? `vs ${newGameForm.opponent}` : `Jornada ${games.length + 1}`,
+            date: newGameForm.date,
+            opponent: newGameForm.opponent,
+            positions: positionsDraft,
+            battingOrder: battingOrderDraft,
+        })
+
+        await addGame({
             ...newGameForm,
             battingOrder: battingOrderDraft,
             positions: positionsDraft,
+            currentBatterIndex: 0,
             runsFor: 0,
             runsAgainst: 0,
         })
@@ -75,7 +92,24 @@ export default function GamesPage() {
     }
 
     const handleStellarLineup = () => {
-        const sorted = [...players].sort((a, b) => calcPlayerAvg(b) - calcPlayerAvg(a))
+        // Composite score: AVG * 0.4 + OBP * 0.3 + SLG * 0.3
+        const scored = players.map(p => {
+            const s = p.stats || {}
+            const ab = s.atBats || 0
+            const hits = s.hits || 0
+            const walks = s.walks || 0
+            const doubles = s.doubles || 0
+            const triples = s.triples || 0
+            const hr = s.homeRuns || 0
+            const singles = hits - doubles - triples - hr
+            const pa = ab + walks
+            const avg = ab > 0 ? hits / ab : 0
+            const obp = pa > 0 ? (hits + walks) / pa : 0
+            const slg = ab > 0 ? (singles + doubles * 2 + triples * 3 + hr * 4) / ab : 0
+            const score = avg * 0.4 + obp * 0.3 + slg * 0.3
+            return { ...p, _score: score }
+        })
+        const sorted = scored.sort((a, b) => b._score - a._score)
         const draftIds = sorted.slice(0, 9).map(p => p.id)
         setBattingOrderDraft(draftIds)
 
@@ -87,7 +121,13 @@ export default function GamesPage() {
     }
 
     const handleEveryoneLineup = () => {
-        const sorted = [...players].sort((a, b) => (a.stats?.atBats || 0) - (b.stats?.atBats || 0))
+        // Prioritize players with fewest games and at-bats (give everyone a chance)
+        const sorted = [...players].sort((a, b) => {
+            const gamesA = a.stats?.gamesPlayed || 0
+            const gamesB = b.stats?.gamesPlayed || 0
+            if (gamesA !== gamesB) return gamesA - gamesB
+            return (a.stats?.atBats || 0) - (b.stats?.atBats || 0)
+        })
         const draftIds = sorted.map(p => p.id)
         setBattingOrderDraft(draftIds)
 
@@ -101,12 +141,23 @@ export default function GamesPage() {
     // ===== GAME EVENT HANDLERS =====
 
     const handlePAEvent = async (gameId, eventType) => {
+        const game = games.find(g => g.id === gameId)
+        if (!game || !game.battingOrder?.length) return
+
+        const currentIdx = game.currentBatterIndex || 0
+        const playerId = game.battingOrder[currentIdx % game.battingOrder.length]
+
+        // Record the event with the current batter's ID
         await addGameEvent(gameId, {
             inning: activeInning,
             half: 'offense',
             eventType,
-            // playerId is auto-assigned by the server based on currentBatterIndex
+            playerId,
         })
+
+        // Advance to next batter
+        const nextIdx = currentIdx + 1
+        await updateGame(gameId, { currentBatterIndex: nextIdx })
     }
 
     const handleDefenseEvent = async (gameId, eventType) => {

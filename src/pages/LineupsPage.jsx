@@ -56,7 +56,7 @@ export default function LineupsPage() {
       </head>
       <body>
         <div class="header">
-          <img src="${window.location.origin}/logo.png" alt="Logo" style="height: 60px; object-fit: contain; margin-bottom: 15px;" />
+          <img src="${window.location.origin}/logo.png" alt="Logo" style="height: 60px; width: 60px; object-fit: cover; margin-bottom: 15px; border-radius: 50%;" />
           <h1>Deprecados</h1>
           <div class="meta">
             <strong>${lineup.name}</strong><br/>
