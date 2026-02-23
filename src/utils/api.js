@@ -126,4 +126,8 @@ export const apiMigrate = async (localData) => {
     return true
 }
 
-export const apiHealth = async () => true // Always true for Firebase
+export const apiHealth = async () => {
+    // Actually test Firestore connectivity
+    const snap = await getDocs(collection(db, 'players'))
+    return true
+}

@@ -191,17 +191,23 @@ export function DataProvider({ children }) {
 
     // ================== PLAYER CRUD ==================
 
+    const _createLocalPlayer = (playerData) => {
+        return { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), ...playerData, stats: { gamesPlayed: 0, atBats: 0, hits: 0, runs: 0, rbi: 0, homeRuns: 0, strikeouts: 0, walks: 0, stolenBases: 0, errors: 0, doubles: 0, triples: 0, ...(playerData.stats || {}) } }
+    }
+
     const addPlayer = async (playerData) => {
         try {
             if (dbReady) {
                 const p = await apiPlayers.create(playerData)
                 setPlayers(prev => [...prev, p])
                 return p
-            } else {
-                const p = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), ...playerData, stats: { gamesPlayed: 0, atBats: 0, hits: 0, runs: 0, rbi: 0, homeRuns: 0, strikeouts: 0, walks: 0, stolenBases: 0, errors: 0, doubles: 0, triples: 0 } }
-                const np = [...players, p]; setPlayers(np); saveLocal(np); return p
             }
-        } catch (err) { console.error('Error adding player:', err) }
+        } catch (err) {
+            console.warn('Firebase write failed, saving locally:', err.message)
+        }
+        // Fallback to localStorage
+        const p = _createLocalPlayer(playerData)
+        const np = [...players, p]; setPlayers(np); saveLocal(np); return p
     }
 
     const updatePlayer = async (id, updates) => {
@@ -209,17 +215,19 @@ export function DataProvider({ children }) {
             if (dbReady) {
                 const u = await apiPlayers.update(id, updates)
                 setPlayers(prev => prev.map(p => p.id === id ? u : p))
-            } else {
-                const np = players.map(p => p.id === id ? { ...p, ...updates } : p); setPlayers(np); saveLocal(np)
+                return
             }
-        } catch (err) { console.error('Error updating player:', err) }
+        } catch (err) {
+            console.warn('Firebase update failed, saving locally:', err.message)
+        }
+        const np = players.map(p => p.id === id ? { ...p, ...updates } : p); setPlayers(np); saveLocal(np)
     }
 
     const deletePlayer = async (id) => {
         try {
             if (dbReady) await apiPlayers.delete(id)
-            const np = players.filter(p => p.id !== id); setPlayers(np); if (!dbReady) saveLocal(np)
-        } catch (err) { console.error('Error deleting player:', err) }
+        } catch (err) { console.warn('Firebase delete failed:', err.message) }
+        const np = players.filter(p => p.id !== id); setPlayers(np); saveLocal(np)
     }
 
     const updatePlayerStats = async (id, stats) => {
@@ -227,10 +235,12 @@ export function DataProvider({ children }) {
             if (dbReady) {
                 const u = await apiPlayers.updateStats(id, stats)
                 setPlayers(prev => prev.map(p => p.id === id ? u : p))
-            } else {
-                const np = players.map(p => p.id === id ? { ...p, stats: { ...p.stats, ...stats } } : p); setPlayers(np); saveLocal(np)
+                return
             }
-        } catch (err) { console.error('Error updating stats:', err) }
+        } catch (err) {
+            console.warn('Firebase stats update failed, saving locally:', err.message)
+        }
+        const np = players.map(p => p.id === id ? { ...p, stats: { ...p.stats, ...stats } } : p); setPlayers(np); saveLocal(np)
     }
 
     const compileAllStats = async () => {
@@ -250,11 +260,12 @@ export function DataProvider({ children }) {
             if (dbReady) {
                 const l = await apiLineups.create(data)
                 setLineups(prev => [l, ...prev]); return l
-            } else {
-                const l = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), name: '', date: new Date().toISOString().split('T')[0], opponent: '', positions: {}, battingOrder: [], ...data }
-                const nl = [...lineups, l]; setLineups(nl); saveLocal(undefined, nl); return l
             }
-        } catch (err) { console.error('Error adding lineup:', err) }
+        } catch (err) {
+            console.warn('Firebase lineup create failed, saving locally:', err.message)
+        }
+        const l = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), name: '', date: new Date().toISOString().split('T')[0], opponent: '', positions: {}, battingOrder: [], ...data }
+        const nl = [...lineups, l]; setLineups(nl); saveLocal(undefined, nl); return l
     }
 
     const updateLineup = async (id, updates) => {
@@ -262,17 +273,17 @@ export function DataProvider({ children }) {
             if (dbReady) {
                 const u = await apiLineups.update(id, updates)
                 setLineups(prev => prev.map(l => l.id === id ? u : l))
-            } else {
-                const nl = lineups.map(l => l.id === id ? { ...l, ...updates } : l); setLineups(nl); saveLocal(undefined, nl)
+                return
             }
-        } catch (err) { console.error('Error updating lineup:', err) }
+        } catch (err) { console.warn('Firebase lineup update failed, saving locally:', err.message) }
+        const nl = lineups.map(l => l.id === id ? { ...l, ...updates } : l); setLineups(nl); saveLocal(undefined, nl)
     }
 
     const deleteLineup = async (id) => {
         try {
             if (dbReady) await apiLineups.delete(id)
-            const nl = lineups.filter(l => l.id !== id); setLineups(nl); if (!dbReady) saveLocal(undefined, nl)
-        } catch (err) { console.error('Error deleting lineup:', err) }
+        } catch (err) { console.warn('Firebase lineup delete failed:', err.message) }
+        const nl = lineups.filter(l => l.id !== id); setLineups(nl); saveLocal(undefined, nl)
     }
 
     // ================== GAME CRUD ==================
@@ -282,11 +293,10 @@ export function DataProvider({ children }) {
             if (dbReady) {
                 const g = await apiGames.create(data)
                 setGames(prev => [g, ...prev]); return g
-            } else {
-                const g = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), date: new Date().toISOString().split('T')[0], opponent: '', runsFor: 0, runsAgainst: 0, lineupId: null, notes: '', events: [], innings: 7, battingOrder: [], currentBatterIndex: 0, ...data }
-                const ng = [...games, g]; setGames(ng); saveLocal(undefined, undefined, ng); return g
             }
-        } catch (err) { console.error('Error adding game:', err) }
+        } catch (err) { console.warn('Firebase game create failed, saving locally:', err.message) }
+        const g = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), date: new Date().toISOString().split('T')[0], opponent: '', runsFor: 0, runsAgainst: 0, lineupId: null, notes: '', events: [], innings: 7, battingOrder: [], currentBatterIndex: 0, ...data }
+        const ng = [...games, g]; setGames(ng); saveLocal(undefined, undefined, ng); return g
     }
 
     const updateGame = async (id, updates) => {
@@ -294,17 +304,17 @@ export function DataProvider({ children }) {
             if (dbReady) {
                 const u = await apiGames.update(id, updates)
                 setGames(prev => prev.map(g => g.id === id ? u : g))
-            } else {
-                const ng = games.map(g => g.id === id ? { ...g, ...updates } : g); setGames(ng); saveLocal(undefined, undefined, ng)
+                return
             }
-        } catch (err) { console.error('Error updating game:', err) }
+        } catch (err) { console.warn('Firebase game update failed, saving locally:', err.message) }
+        const ng = games.map(g => g.id === id ? { ...g, ...updates } : g); setGames(ng); saveLocal(undefined, undefined, ng)
     }
 
     const deleteGame = async (id) => {
         try {
             if (dbReady) await apiGames.delete(id)
-            const ng = games.filter(g => g.id !== id); setGames(ng); if (!dbReady) saveLocal(undefined, undefined, ng)
-        } catch (err) { console.error('Error deleting game:', err) }
+        } catch (err) { console.warn('Firebase game delete failed:', err.message) }
+        const ng = games.filter(g => g.id !== id); setGames(ng); saveLocal(undefined, undefined, ng)
     }
 
     const addGameEvent = async (gameId, eventData) => {
@@ -315,12 +325,11 @@ export function DataProvider({ children }) {
                 const fp = await apiPlayers.getAll()
                 setPlayers(fp)
                 return ug
-            } else {
-                const newEvent = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), inning: 1, half: 'offense', playerId: null, eventType: '', notes: '', ...eventData }
-                const ng = games.map(g => g.id === gameId ? { ...g, events: [...(g.events || []), newEvent] } : g)
-                setGames(ng); saveLocal(undefined, undefined, ng); return newEvent
             }
-        } catch (err) { console.error('Error adding event:', err) }
+        } catch (err) { console.warn('Firebase addEvent failed, saving locally:', err.message) }
+        const newEvent = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), inning: 1, half: 'offense', playerId: null, eventType: '', notes: '', ...eventData }
+        const ng = games.map(g => g.id === gameId ? { ...g, events: [...(g.events || []), newEvent] } : g)
+        setGames(ng); saveLocal(undefined, undefined, ng); return newEvent
     }
 
     const deleteGameEvent = async (gameId, eventId) => {
@@ -331,11 +340,10 @@ export function DataProvider({ children }) {
                 const fp = await apiPlayers.getAll()
                 setPlayers(fp)
                 return ug
-            } else {
-                const ng = games.map(g => g.id === gameId ? { ...g, events: (g.events || []).filter(e => e.id !== eventId) } : g)
-                setGames(ng); saveLocal(undefined, undefined, ng)
             }
-        } catch (err) { console.error('Error deleting event:', err) }
+        } catch (err) { console.warn('Firebase deleteEvent failed, saving locally:', err.message) }
+        const ng = games.map(g => g.id === gameId ? { ...g, events: (g.events || []).filter(e => e.id !== eventId) } : g)
+        setGames(ng); saveLocal(undefined, undefined, ng)
     }
 
     const getPlayer = (id) => players.find(p => p.id === id)
