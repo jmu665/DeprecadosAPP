@@ -1,6 +1,7 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { DataProvider, useData } from './utils/DataContext'
+import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
 import HomePage from './pages/HomePage'
 import RosterPage from './pages/RosterPage'
@@ -31,14 +32,16 @@ function AppContent() {
             <Navbar />
             <main className="md:pl-20 pb-24 md:pb-8 pt-6">
                 <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
-                    <Routes>
-                        <Route path="/" element={<HomePage />} />
-                        <Route path="/roster" element={<RosterPage />} />
-                        <Route path="/field" element={<FieldPage />} />
-                        <Route path="/lineups" element={<LineupsPage />} />
-                        <Route path="/stats" element={<StatsPage />} />
-                        <Route path="/games" element={<GamesPage />} />
-                    </Routes>
+                    <ErrorBoundary>
+                        <Routes>
+                            <Route path="/" element={<HomePage />} />
+                            <Route path="/roster" element={<RosterPage />} />
+                            <Route path="/field" element={<FieldPage />} />
+                            <Route path="/lineups" element={<LineupsPage />} />
+                            <Route path="/stats" element={<StatsPage />} />
+                            <Route path="/games" element={<GamesPage />} />
+                        </Routes>
+                    </ErrorBoundary>
                 </div>
             </main>
         </div>

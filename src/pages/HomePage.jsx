@@ -6,14 +6,14 @@ import { useData, POSITIONS, calcPlayerAvg, formatAvg } from '../utils/DataConte
 export default function HomePage() {
     const { players, lineups, games } = useData()
 
-    const totalGames = games.length
-    const wins = games.filter(g => g.runsFor > g.runsAgainst).length
-    const losses = games.filter(g => g.runsFor < g.runsAgainst).length
+    const totalGames = games?.length || 0
+    const wins = (games || []).filter(g => (g?.runsFor || 0) > (g?.runsAgainst || 0)).length
+    const losses = (games || []).filter(g => (g?.runsFor || 0) < (g?.runsAgainst || 0)).length
 
     // Top 9 players by AVG (like a starting 9)
-    const top9 = [...players]
+    const top9 = [...(players || [])]
         .map(p => ({ ...p, avg: calcPlayerAvg(p) }))
-        .sort((a, b) => b.avg - a.avg)
+        .sort((a, b) => (b?.avg || 0) - (a?.avg || 0))
         .slice(0, 9)
 
     const quickLinks = [
@@ -58,14 +58,14 @@ export default function HomePage() {
                     <div className="flex items-center justify-center mb-2">
                         <Users size={20} className="text-primary" />
                     </div>
-                    <div className="stat-value">{players.length}</div>
+                    <div className="stat-value">{players?.length || 0}</div>
                     <div className="stat-label">Jugadores</div>
                 </div>
                 <div className="stat-card">
                     <div className="flex items-center justify-center mb-2">
                         <CalendarDays size={20} className="text-primary" />
                     </div>
-                    <div className="stat-value">{lineups.length}</div>
+                    <div className="stat-value">{lineups?.length || 0}</div>
                     <div className="stat-label">Alineaciones</div>
                 </div>
                 <div className="stat-card">
@@ -85,7 +85,7 @@ export default function HomePage() {
             </div>
 
             {/* Top 9 Players */}
-            {players.length > 0 && (
+            {(players?.length || 0) > 0 && (
                 <div className="mb-8">
                     <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
                         <Medal size={18} className="text-yellow-400" />
@@ -138,7 +138,7 @@ export default function HomePage() {
                                 )
                             })}
                         </div>
-                        {players.length > 9 && (
+                        {(players?.length || 0) > 9 && (
                             <Link to="/stats" className="block p-3 text-center text-xs text-primary hover:bg-primary/5 transition-colors border-t border-white/5">
                                 Ver todas las estadísticas →
                             </Link>
@@ -173,11 +173,11 @@ export default function HomePage() {
             </div>
 
             {/* Recent lineups */}
-            {lineups.length > 0 && (
+            {(lineups?.length || 0) > 0 && (
                 <div>
                     <h2 className="text-lg font-bold mb-4">Alineaciones recientes</h2>
                     <div className="space-y-3">
-                        {lineups.slice(-3).reverse().map(lineup => (
+                        {(lineups || []).slice(-3).reverse().map(lineup => (
                             <Link
                                 key={lineup.id}
                                 to={`/lineups`}
@@ -193,7 +193,7 @@ export default function HomePage() {
                                     </div>
                                 </div>
                                 <div className="text-xs text-text-muted">
-                                    {Object.keys(lineup.positions).length}/9
+                                    {Object.keys(lineup.positions || {}).length}/9
                                 </div>
                             </Link>
                         ))}

@@ -243,6 +243,44 @@ export function DataProvider({ children }) {
         const np = players.map(p => p.id === id ? { ...p, stats: { ...p.stats, ...stats } } : p); setPlayers(np); saveLocal(np)
     }
 
+    const _compileStatsOffline = (currentGames, currentPlayers) => {
+        const newStats = {}
+        for (const p of currentPlayers) {
+            newStats[p.id] = { gamesPlayed: 0, atBats: 0, hits: 0, runs: 0, rbi: 0, homeRuns: 0, strikeouts: 0, walks: 0, stolenBases: 0, errors: 0, doubles: 0, triples: 0 }
+        }
+
+        for (const g of currentGames) {
+            const played = new Set()
+            for (const e of (g.events || [])) {
+                if (!e.playerId || !newStats[e.playerId]) continue
+                played.add(e.playerId)
+                const s = newStats[e.playerId]
+                const type = e.eventType
+
+                if (['single', 'double', 'triple', 'homerun'].includes(type)) s.hits++
+                if (type === 'double') s.doubles++
+                if (type === 'triple') s.triples++
+                if (type === 'homerun') s.homeRuns++
+                if (['walk', 'hbp'].includes(type)) s.walks++
+                if (type === 'strikeout') s.strikeouts++
+                if (['single', 'double', 'triple', 'homerun', 'strikeout', 'groundout', 'flyout', 'popout', 'reached_error'].includes(type)) s.atBats++
+
+                if (type === 'run') s.runs++
+                if (type === 'rbi') s.rbi++
+                if (type === 'stolenbase') s.stolenBases++
+                if (type === 'fielding_error') s.errors++
+            }
+            played.forEach(pId => newStats[pId].gamesPlayed++)
+        }
+
+        return currentPlayers.map(p => {
+            if (newStats[p.id]) {
+                return { ...p, stats: { ...p.stats, ...newStats[p.id] } }
+            }
+            return p
+        })
+    }
+
     const compileAllStats = async () => {
         try {
             if (dbReady) {
@@ -250,7 +288,13 @@ export function DataProvider({ children }) {
                 setPlayers(up)
                 return up
             }
-        } catch (err) { console.error('Error compiling stats:', err) }
+        } catch (err) { console.warn('Firebase compileStats failed, compiling locally:', err.message) }
+
+        // Offline compiling fallback
+        const updatedPlayers = _compileStatsOffline(games, players)
+        setPlayers(updatedPlayers)
+        saveLocal(updatedPlayers)
+        return updatedPlayers
     }
 
     // ================== LINEUP CRUD ==================
@@ -329,7 +373,14 @@ export function DataProvider({ children }) {
         } catch (err) { console.warn('Firebase addEvent failed, saving locally:', err.message) }
         const newEvent = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), timestamp: new Date().toISOString(), inning: 1, half: 'offense', playerId: null, eventType: '', notes: '', ...eventData }
         const ng = games.map(g => g.id === gameId ? { ...g, events: [...(g.events || []), newEvent] } : g)
-        setGames(ng); saveLocal(undefined, undefined, ng); return newEvent
+        setGames(ng)
+
+        // Recompile stats locally
+        const updatedPlayers = _compileStatsOffline(ng, players)
+        setPlayers(updatedPlayers)
+
+        saveLocal(updatedPlayers, undefined, ng)
+        return newEvent
     }
 
     const deleteGameEvent = async (gameId, eventId) => {
@@ -343,7 +394,13 @@ export function DataProvider({ children }) {
             }
         } catch (err) { console.warn('Firebase deleteEvent failed, saving locally:', err.message) }
         const ng = games.map(g => g.id === gameId ? { ...g, events: (g.events || []).filter(e => e.id !== eventId) } : g)
-        setGames(ng); saveLocal(undefined, undefined, ng)
+        setGames(ng)
+
+        // Recompile stats locally
+        const updatedPlayers = _compileStatsOffline(ng, players)
+        setPlayers(updatedPlayers)
+
+        saveLocal(updatedPlayers, undefined, ng)
     }
 
     const getPlayer = (id) => players.find(p => p.id === id)

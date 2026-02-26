@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { useData, POSITIONS } from '../utils/DataContext'
+import { useData, POSITIONS, calcPlayerStars } from '../utils/DataContext'
 import BaseballField from '../components/BaseballField'
 import Modal from '../components/Modal'
 import { Plus, Trash2, Printer, Eye, CalendarDays, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
@@ -15,21 +15,32 @@ export default function LineupsPage() {
     const handleCreate = () => {
         addLineup({
             ...newLineup,
-            name: newLineup.name || `Lineup ${lineups.length + 1}`,
+            name: newLineup.name || `Lineup ${(lineups?.length || 0) + 1}`,
         })
         setShowCreateModal(false)
         setNewLineup({ name: '', date: new Date().toISOString().split('T')[0], opponent: '' })
     }
 
     const handlePrint = (lineup) => {
+        const renderHtmlStars = (stars) => {
+            if (stars === 0) return `<span class="stars-container"><span class="star-text">Sin datos</span></span>`
+            let html = '<span class="stars-container">'
+            for (let i = 1; i <= 5; i++) {
+                html += `<span class="${i <= stars ? 'star-active' : 'star-inactive'}">★</span>`
+            }
+            html += '</span>'
+            return html
+        }
+
         const printWindow = window.open('', '_blank')
-        const positionsList = Object.entries(lineup.positions).map(([posId, playerId]) => {
+        const positions = lineup.positions || {}
+        const positionsList = Object.entries(positions).map(([posId, playerId]) => {
             const player = getPlayer(playerId)
             const posInfo = POSITIONS.find(p => p.id === posId)
             return { position: posInfo?.label || posId, short: posInfo?.short || posId, player }
         })
 
-        const battingOrderList = lineup.battingOrder.map((playerId, idx) => {
+        const battingOrderList = (lineup.battingOrder || []).map((playerId, idx) => {
             const player = getPlayer(playerId)
             return { order: idx + 1, player }
         })
@@ -51,6 +62,11 @@ export default function LineupsPage() {
           th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
           th { background: #f5f5f5; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; color: #666; }
           .number { font-weight: 800; color: #DC2626; font-size: 16px; }
+          .stars-container { display: inline-flex; gap: 1px; align-items: center; }
+          .stars-container .star-active { color: #facc15; font-size: 12px; }
+          .stars-container .star-inactive { color: #e5e7eb; font-size: 12px; }
+          .stars-container .star-text { font-size: 10px; color: #9ca3af; font-style: italic; }
+          .player-name-cell { display: flex; flex-direction: column; gap: 2px; }
           .footer { text-align: center; margin-top: 40px; color: #999; font-size: 11px; }
         </style>
       </head>
@@ -72,7 +88,12 @@ export default function LineupsPage() {
                 <tr>
                   <td><strong>${short}</strong></td>
                   <td class="number">${player?.number || '-'}</td>
-                  <td>${player?.name || 'Vacante'}</td>
+                  <td>
+                    <div class="player-name-cell">
+                        <span>${player?.name || 'Vacante'}</span>
+                        ${player ? renderHtmlStars(calcPlayerStars(player)) : ''}
+                    </div>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -88,7 +109,12 @@ export default function LineupsPage() {
                 <tr>
                   <td><strong>${order}</strong></td>
                   <td class="number">${player?.number || '-'}</td>
-                  <td>${player?.name || '-'}</td>
+                  <td>
+                    <div class="player-name-cell">
+                        <span>${player?.name || '-'}</span>
+                        ${player ? renderHtmlStars(calcPlayerStars(player)) : ''}
+                    </div>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -108,7 +134,7 @@ export default function LineupsPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl font-black tracking-tight">Alineaciones</h1>
-                    <p className="text-text-muted text-sm mt-1">{lineups.length} alineaciones guardadas</p>
+                    <p className="text-text-muted text-sm mt-1">{lineups?.length || 0} alineaciones guardadas</p>
                 </div>
                 <button
                     onClick={() => setShowCreateModal(true)}
@@ -119,7 +145,7 @@ export default function LineupsPage() {
                 </button>
             </div>
 
-            {lineups.length === 0 ? (
+            {(lineups?.length || 0) === 0 ? (
                 <div className="glass-card p-12 text-center">
                     <CalendarDays size={48} className="mx-auto mb-4 text-text-muted/30" />
                     <p className="text-text-muted font-medium">
@@ -128,9 +154,10 @@ export default function LineupsPage() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    {[...lineups].reverse().map((lineup, i) => {
+                    {[...(lineups || [])].reverse().map((lineup, i) => {
                         const isExpanded = expandedId === lineup.id
-                        const assignedCount = Object.keys(lineup.positions).length
+                        const positions = lineup.positions || {}
+                        const assignedCount = Object.keys(positions).length
 
                         return (
                             <div
@@ -181,7 +208,7 @@ export default function LineupsPage() {
                                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                             {/* Mini field */}
                                             <div className="max-w-sm mx-auto">
-                                                <BaseballField positions={lineup.positions} interactive={false} />
+                                                <BaseballField positions={positions} interactive={false} />
                                             </div>
 
                                             {/* Position list */}
@@ -189,7 +216,7 @@ export default function LineupsPage() {
                                                 <h4 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-3">Alineación</h4>
                                                 <div className="space-y-2">
                                                     {POSITIONS.filter(p => p.id !== 'DH').map(pos => {
-                                                        const playerId = lineup.positions[pos.id]
+                                                        const playerId = positions[pos.id]
                                                         const player = playerId ? getPlayer(playerId) : null
                                                         return (
                                                             <div key={pos.id} className="flex items-center gap-3 p-2 rounded-lg bg-white/3">
