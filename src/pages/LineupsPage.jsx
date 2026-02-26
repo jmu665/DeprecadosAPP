@@ -15,6 +15,52 @@ export default function LineupsPage() {
     const [positionsDraft, setPositionsDraft] = useState({})
     const printRef = useRef()
 
+    // Edit batting order state
+    const [editLineupId, setEditLineupId] = useState(null)
+    const [editOrder, setEditOrder] = useState([])
+    const [editPositions, setEditPositions] = useState({})
+
+    const openEditOrder = (lineup) => {
+        setEditLineupId(lineup.id)
+        setEditOrder([...(lineup.battingOrder || [])])
+        setEditPositions({ ...(lineup.positions || {}) })
+    }
+
+    const closeEditOrder = () => {
+        setEditLineupId(null)
+        setEditOrder([])
+        setEditPositions({})
+    }
+
+    const editMoveBatter = (index, direction) => {
+        setEditOrder(prev => {
+            const arr = [...prev]
+            const newIndex = index + direction
+            if (newIndex < 0 || newIndex >= arr.length) return arr
+                ;[arr[index], arr[newIndex]] = [arr[newIndex], arr[index]]
+            return arr
+        })
+    }
+
+    const editRemoveBatter = (index) => {
+        setEditOrder(prev => {
+            const arr = [...prev]
+            const removed = arr.splice(index, 1)[0]
+            setEditPositions(pos => { const p = { ...pos }; delete p[removed]; return p })
+            return arr
+        })
+    }
+
+    const editAddBatter = (playerId) => {
+        setEditOrder(prev => [...prev, playerId])
+        setEditPositions(prev => ({ ...prev, [playerId]: players.find(p => p.id === playerId)?.position || 'P' }))
+    }
+
+    const saveEditOrder = () => {
+        updateLineup(editLineupId, { battingOrder: editOrder, positions: editPositions })
+        closeEditOrder()
+    }
+
     const availableForBatting = players.filter(p => !battingOrderDraft.includes(p.id))
 
     const resetCreateModal = () => {
@@ -309,9 +355,17 @@ export default function LineupsPage() {
                                                 </div>
 
                                                 {/* Batting order */}
-                                                {lineup.battingOrder?.length > 0 && (
-                                                    <div className="mt-6">
-                                                        <h4 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-3">Orden al Bat</h4>
+                                                <div className="mt-6">
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <h4 className="text-sm font-bold uppercase tracking-wider text-text-muted">Orden al Bat</h4>
+                                                        <button
+                                                            onClick={() => openEditOrder(lineup)}
+                                                            className="text-xs px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all flex items-center gap-1"
+                                                        >
+                                                            ✏️ Editar
+                                                        </button>
+                                                    </div>
+                                                    {lineup.battingOrder?.length > 0 ? (
                                                         <div className="space-y-2">
                                                             {lineup.battingOrder.map((playerId, idx) => {
                                                                 const player = getPlayer(playerId)
@@ -323,12 +377,20 @@ export default function LineupsPage() {
                                                                         <span className="text-sm text-white">
                                                                             {player ? `#${player.number || '?'} ${player.name}` : '—'}
                                                                         </span>
+                                                                        <span className="text-[10px] text-text-muted ml-auto">{lineup.positions?.[playerId] || player?.position || ''}</span>
                                                                     </div>
                                                                 )
                                                             })}
                                                         </div>
-                                                    </div>
-                                                )}
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => openEditOrder(lineup)}
+                                                            className="w-full py-3 text-xs text-center text-text-muted bg-white/3 rounded-xl border border-dashed border-white/10 hover:border-primary/30 hover:text-primary transition-all"
+                                                        >
+                                                            + Agregar orden al bat
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -338,6 +400,81 @@ export default function LineupsPage() {
                     })}
                 </div>
             )}
+
+            {/* Edit Batting Order Modal */}
+            <Modal
+                isOpen={!!editLineupId}
+                onClose={closeEditOrder}
+                title="✏️ Editar Orden al Bat"
+            >
+                {editLineupId && (() => {
+                    const benchPlayers = players.filter(p => !editOrder.includes(p.id))
+                    return (
+                        <div className="space-y-4">
+                            {/* Current order */}
+                            <div>
+                                <label className="block text-xs font-medium text-text-muted mb-2 uppercase tracking-wider">Orden al Bat ({editOrder.length})</label>
+                                {editOrder.length === 0 ? (
+                                    <p className="text-xs text-text-muted text-center py-3 bg-white/3 rounded-xl">Agrega jugadores de abajo</p>
+                                ) : (
+                                    <div className="space-y-1 max-h-60 overflow-y-auto">
+                                        {editOrder.map((pId, idx) => {
+                                            const player = getPlayer(pId)
+                                            if (!player) return null
+                                            return (
+                                                <div key={pId} className="flex items-center gap-2 p-2 rounded-lg bg-primary/10 border border-primary/15">
+                                                    <span className="w-6 h-6 rounded flex items-center justify-center text-xs font-black bg-primary text-white" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                                                        {idx + 1}
+                                                    </span>
+                                                    <span className="flex-1 text-sm font-medium text-white truncate">#{player.number} {player.name}</span>
+                                                    <select
+                                                        value={editPositions[pId] || player.position || ''}
+                                                        onChange={e => setEditPositions(prev => ({ ...prev, [pId]: e.target.value }))}
+                                                        className="bg-white/5 text-[10px] text-primary border border-primary/20 rounded font-bold outline-none cursor-pointer py-1 px-1 appearance-none text-center hover:bg-white/10"
+                                                    >
+                                                        {POSITIONS.map(pos => <option key={pos.id} value={pos.id} className="bg-surface text-white">{pos.short}</option>)}
+                                                        <option value="BD" className="bg-surface text-white">BD</option>
+                                                        <option value="Banca" className="bg-surface text-white">Banca</option>
+                                                    </select>
+                                                    <button onClick={() => editMoveBatter(idx, -1)} disabled={idx === 0} className="p-0.5 text-text-muted hover:text-white disabled:opacity-20"><ArrowUp size={14} /></button>
+                                                    <button onClick={() => editMoveBatter(idx, 1)} disabled={idx === editOrder.length - 1} className="p-0.5 text-text-muted hover:text-white disabled:opacity-20"><ArrowDown size={14} /></button>
+                                                    <button onClick={() => editRemoveBatter(idx)} className="p-0.5 text-text-muted hover:text-red-400"><X size={14} /></button>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Bench players */}
+                            {benchPlayers.length > 0 && (
+                                <div>
+                                    <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Jugadores disponibles</label>
+                                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                                        {benchPlayers.map(player => (
+                                            <button
+                                                key={player.id}
+                                                onClick={() => editAddBatter(player.id)}
+                                                className="w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-left"
+                                            >
+                                                <span className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold bg-white/10 text-text-muted" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{player.number || '?'}</span>
+                                                <span className="flex-1 text-sm text-white truncate">{player.name}</span>
+                                                <span className="text-[10px] text-primary">{player.position}</span>
+                                                <Plus size={14} className="text-text-muted" />
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-1">
+                                <button onClick={closeEditOrder} className="btn-secondary flex-1">Cancelar</button>
+                                <button onClick={saveEditOrder} className="btn-primary flex-1">Guardar Orden</button>
+                            </div>
+                        </div>
+                    )
+                })()}
+            </Modal>
 
             {/* Create modal */}
             <Modal

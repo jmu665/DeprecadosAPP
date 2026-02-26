@@ -868,6 +868,46 @@ export default function GamesPage() {
             >
                 {gameStep === 1 ? (
                     <div className="space-y-4">
+                        {/* Load from existing lineup */}
+                        {lineups?.length > 0 && (
+                            <div className="bg-blue-500/5 border border-blue-500/15 rounded-xl p-3">
+                                <label className="block text-xs font-medium text-blue-300 mb-2 uppercase tracking-wider">
+                                    📋 Cargar Alineación Guardada
+                                </label>
+                                <select
+                                    className="input-field text-sm"
+                                    defaultValue=""
+                                    onChange={e => {
+                                        const lineup = lineups.find(l => l.id === e.target.value)
+                                        if (!lineup) return
+                                        // Pre-fill game info from lineup
+                                        setNewGameForm(prev => ({
+                                            ...prev,
+                                            opponent: lineup.opponent || prev.opponent,
+                                            date: lineup.date || prev.date,
+                                        }))
+                                        // Pre-fill batting order and positions
+                                        if (lineup.battingOrder?.length > 0) {
+                                            setBattingOrderDraft(lineup.battingOrder)
+                                            setPositionsDraft(lineup.positions || {})
+                                        }
+                                    }}
+                                >
+                                    <option value="">— Seleccionar alineación guardada —</option>
+                                    {[...(lineups || [])].reverse().map(l => (
+                                        <option key={l.id} value={l.id}>
+                                            {l.name} {l.date ? `(${l.date})` : ''} {l.battingOrder?.length > 0 ? `· ${l.battingOrder.length} jug.` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                {battingOrderDraft.length > 0 && (
+                                    <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
+                                        ✓ {battingOrderDraft.length} jugadores cargados — puedes ajustarlos en el siguiente paso
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <div>
                             <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Fecha</label>
                             <input type="date" value={newGameForm.date} onChange={e => setNewGameForm(p => ({ ...p, date: e.target.value }))} className="input-field" />
@@ -885,7 +925,7 @@ export default function GamesPage() {
                             <textarea value={newGameForm.notes} onChange={e => setNewGameForm(p => ({ ...p, notes: e.target.value }))} className="input-field" rows={2} placeholder="Notas opcionales..." />
                         </div>
                         <button onClick={() => setGameStep(2)} className="btn-primary w-full" disabled={players.length === 0}>
-                            Siguiente → Orden al Bat
+                            {battingOrderDraft.length > 0 ? `Siguiente → Revisar Orden al Bat (${battingOrderDraft.length} jug.)` : 'Siguiente → Orden al Bat'}
                         </button>
                     </div>
                 ) : (
