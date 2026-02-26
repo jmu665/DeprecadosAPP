@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react'
-import { useData, POSITIONS, calcPlayerStars } from '../utils/DataContext'
+import { useData, POSITIONS, calcPlayerStars, calcPlayerAvg, formatAvg } from '../utils/DataContext'
 import BaseballField from '../components/BaseballField'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Printer, Eye, CalendarDays, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
+import { Plus, Trash2, Printer, Eye, CalendarDays, ChevronDown, ChevronUp, GripVertical, ArrowUp, ArrowDown, Users, Crown, X } from 'lucide-react'
 
 export default function LineupsPage() {
     const { players, lineups, addLineup, updateLineup, deleteLineup, getPlayer } = useData()
@@ -10,15 +10,94 @@ export default function LineupsPage() {
     const [confirmDelete, setConfirmDelete] = useState(null)
     const [showCreateModal, setShowCreateModal] = useState(false)
     const [newLineup, setNewLineup] = useState({ name: '', date: new Date().toISOString().split('T')[0], opponent: '' })
+    const [createStep, setCreateStep] = useState(1) // 1=info, 2=batting order
+    const [battingOrderDraft, setBattingOrderDraft] = useState([])
+    const [positionsDraft, setPositionsDraft] = useState({})
     const printRef = useRef()
+
+    const availableForBatting = players.filter(p => !battingOrderDraft.includes(p.id))
+
+    const resetCreateModal = () => {
+        setShowCreateModal(false)
+        setCreateStep(1)
+        setBattingOrderDraft([])
+        setPositionsDraft({})
+        setNewLineup({ name: '', date: new Date().toISOString().split('T')[0], opponent: '' })
+    }
+
+    const addToBattingOrder = (playerId) => {
+        setBattingOrderDraft(prev => [...prev, playerId])
+        setPositionsDraft(prev => ({ ...prev, [playerId]: players.find(p => p.id === playerId)?.position || 'P' }))
+    }
+
+    const removeFromBattingOrder = (index) => {
+        setBattingOrderDraft(prev => {
+            const arr = [...prev]
+            const idRemoved = arr.splice(index, 1)[0]
+            setPositionsDraft(pos => {
+                const newPos = { ...pos }
+                delete newPos[idRemoved]
+                return newPos
+            })
+            return arr
+        })
+    }
+
+    const moveBatter = (index, direction) => {
+        setBattingOrderDraft(prev => {
+            const arr = [...prev]
+            const newIndex = index + direction
+            if (newIndex < 0 || newIndex >= arr.length) return arr
+                ;[arr[index], arr[newIndex]] = [arr[newIndex], arr[index]]
+            return arr
+        })
+    }
+
+    const handleStellarLineup = () => {
+        const scored = players.map(p => {
+            const s = p.stats || {}
+            const ab = s.atBats || 0
+            const hits = s.hits || 0
+            const walks = s.walks || 0
+            const doubles = s.doubles || 0
+            const triples = s.triples || 0
+            const hr = s.homeRuns || 0
+            const singles = hits - doubles - triples - hr
+            const pa = ab + walks
+            const avg = ab > 0 ? hits / ab : 0
+            const obp = pa > 0 ? (hits + walks) / pa : 0
+            const slg = ab > 0 ? (singles + doubles * 2 + triples * 3 + hr * 4) / ab : 0
+            return { ...p, _score: avg * 0.4 + obp * 0.3 + slg * 0.3 }
+        }).sort((a, b) => b._score - a._score)
+        const draftIds = scored.slice(0, 9).map(p => p.id)
+        setBattingOrderDraft(draftIds)
+        const posDraft = {}
+        draftIds.forEach(id => { posDraft[id] = players.find(p => p.id === id)?.position || 'P' })
+        setPositionsDraft(posDraft)
+    }
+
+    const handleEveryoneLineup = () => {
+        const sorted = [...players].sort((a, b) => {
+            const gA = a.stats?.gamesPlayed || 0
+            const gB = b.stats?.gamesPlayed || 0
+            if (gA !== gB) return gA - gB
+            return (a.stats?.atBats || 0) - (b.stats?.atBats || 0)
+        })
+        const draftIds = sorted.map(p => p.id)
+        setBattingOrderDraft(draftIds)
+        const posDraft = {}
+        draftIds.forEach(id => { posDraft[id] = players.find(p => p.id === id)?.position || 'P' })
+        setPositionsDraft(posDraft)
+    }
 
     const handleCreate = () => {
         addLineup({
             ...newLineup,
             name: newLineup.name || `Lineup ${(lineups?.length || 0) + 1}`,
+            battingOrder: battingOrderDraft,
+            positions: positionsDraft,
         })
-        setShowCreateModal(false)
-        setNewLineup({ name: '', date: new Date().toISOString().split('T')[0], opponent: '' })
+        resetCreateModal()
     }
 
     const handlePrint = (lineup) => {
@@ -263,44 +342,141 @@ export default function LineupsPage() {
             {/* Create modal */}
             <Modal
                 isOpen={showCreateModal}
-                onClose={() => setShowCreateModal(false)}
-                title="Nueva Alineación"
+                onClose={resetCreateModal}
+                title={createStep === 1 ? 'Nueva Alineación' : 'Orden al Bat'}
             >
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Nombre</label>
-                        <input
-                            type="text"
-                            value={newLineup.name}
-                            onChange={e => setNewLineup(prev => ({ ...prev, name: e.target.value }))}
-                            className="input-field"
-                            placeholder="Ej: Jornada 5"
-                        />
+                {createStep === 1 ? (
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Nombre</label>
+                            <input
+                                type="text"
+                                value={newLineup.name}
+                                onChange={e => setNewLineup(prev => ({ ...prev, name: e.target.value }))}
+                                className="input-field"
+                                placeholder="Ej: Jornada 5"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Fecha</label>
+                            <input
+                                type="date"
+                                value={newLineup.date}
+                                onChange={e => setNewLineup(prev => ({ ...prev, date: e.target.value }))}
+                                className="input-field"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Rival</label>
+                            <input
+                                type="text"
+                                value={newLineup.opponent}
+                                onChange={e => setNewLineup(prev => ({ ...prev, opponent: e.target.value }))}
+                                className="input-field"
+                                placeholder="Nombre del equipo rival"
+                            />
+                        </div>
+                        <button onClick={() => setCreateStep(2)} className="btn-primary w-full">
+                            Siguiente → Orden al Bat
+                        </button>
                     </div>
-                    <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Fecha</label>
-                        <input
-                            type="date"
-                            value={newLineup.date}
-                            onChange={e => setNewLineup(prev => ({ ...prev, date: e.target.value }))}
-                            className="input-field"
-                        />
+                ) : (
+                    <div className="space-y-4">
+                        {/* Auto-fill buttons */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleStellarLineup}
+                                className="flex-1 p-2 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 text-yellow-400 text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
+                            >
+                                <Crown size={14} /> Estrellas
+                            </button>
+                            <button
+                                onClick={handleEveryoneLineup}
+                                className="flex-1 p-2 rounded-lg bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 text-green-400 text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
+                            >
+                                <Users size={14} /> Todos Juegan
+                            </button>
+                        </div>
+
+                        {/* Selected batting order */}
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <label className="block text-xs font-medium text-text-muted uppercase tracking-wider">
+                                    Alineación ({battingOrderDraft.length})
+                                </label>
+                            </div>
+                            {battingOrderDraft.length === 0 ? (
+                                <p className="text-xs text-text-muted text-center py-3 bg-white/3 rounded-xl">
+                                    Selecciona jugadores de abajo
+                                </p>
+                            ) : (
+                                <div className="space-y-1 max-h-52 overflow-y-auto">
+                                    {battingOrderDraft.map((pId, idx) => {
+                                        const player = players.find(p => p.id === pId)
+                                        if (!player) return null
+                                        return (
+                                            <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-primary/10 border border-primary/15">
+                                                <span className="w-6 h-6 rounded flex items-center justify-center text-xs font-black bg-primary text-white" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                                                    {idx + 1}
+                                                </span>
+                                                <span className="flex-1 text-sm font-medium text-white truncate">
+                                                    #{player.number} {player.name}
+                                                </span>
+                                                <select
+                                                    value={positionsDraft[pId] || player.position || ''}
+                                                    onChange={e => setPositionsDraft(prev => ({ ...prev, [pId]: e.target.value }))}
+                                                    className="bg-white/5 text-[10px] text-primary border border-primary/20 rounded font-bold outline-none cursor-pointer py-1 px-1 appearance-none text-center hover:bg-white/10"
+                                                >
+                                                    {POSITIONS.map(pos => (
+                                                        <option key={pos.id} value={pos.id} className="bg-surface text-white">{pos.short}</option>
+                                                    ))}
+                                                    <option value="BD" className="bg-surface text-white">BD</option>
+                                                    <option value="Banca" className="bg-surface text-white">Banca</option>
+                                                </select>
+                                                <button onClick={() => moveBatter(idx, -1)} disabled={idx === 0} className="p-0.5 ml-1 text-text-muted hover:text-white disabled:opacity-20"><ArrowUp size={14} /></button>
+                                                <button onClick={() => moveBatter(idx, 1)} disabled={idx === battingOrderDraft.length - 1} className="p-0.5 text-text-muted hover:text-white disabled:opacity-20"><ArrowDown size={14} /></button>
+                                                <button onClick={() => removeFromBattingOrder(idx)} className="p-0.5 text-text-muted hover:text-red-400"><X size={14} /></button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Available players */}
+                        {availableForBatting.length > 0 && (
+                            <div>
+                                <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Jugadores disponibles</label>
+                                <div className="space-y-1 max-h-40 overflow-y-auto">
+                                    {availableForBatting.map(player => (
+                                        <button
+                                            key={player.id}
+                                            onClick={() => addToBattingOrder(player.id)}
+                                            className="w-full flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-left"
+                                        >
+                                            <span className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold bg-white/10 text-text-muted" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{player.number || '?'}</span>
+                                            <span className="flex-1 text-sm text-white truncate">{player.name}</span>
+                                            <span className="text-[10px] text-primary">{player.position}</span>
+                                            <span className="text-[10px] text-text-muted">{formatAvg(calcPlayerAvg(player))}</span>
+                                            <Plus size={14} className="text-text-muted" />
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 pt-2">
+                            <button onClick={() => setCreateStep(1)} className="btn-secondary flex-1">← Atrás</button>
+                            <button
+                                onClick={handleCreate}
+                                disabled={battingOrderDraft.length < 1}
+                                className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                Crear Alineación
+                            </button>
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1.5 uppercase tracking-wider">Rival</label>
-                        <input
-                            type="text"
-                            value={newLineup.opponent}
-                            onChange={e => setNewLineup(prev => ({ ...prev, opponent: e.target.value }))}
-                            className="input-field"
-                            placeholder="Nombre del equipo rival"
-                        />
-                    </div>
-                    <div className="flex gap-3 pt-2">
-                        <button onClick={handleCreate} className="btn-primary flex-1">Crear</button>
-                        <button onClick={() => setShowCreateModal(false)} className="btn-secondary">Cancelar</button>
-                    </div>
-                </div>
+                )}
             </Modal>
 
             {/* Delete confirmation */}

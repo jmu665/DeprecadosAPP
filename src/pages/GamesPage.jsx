@@ -17,6 +17,11 @@ export default function GamesPage() {
     const [showExtraEvent, setShowExtraEvent] = useState(null) // { gameId, eventType, half }
     const [extraPlayerId, setExtraPlayerId] = useState('')
 
+    // Substitution modal
+    const [showSubModal, setShowSubModal] = useState(null) // gameId | null
+    const [subPlayerOut, setSubPlayerOut] = useState('')
+    const [subPlayerIn, setSubPlayerIn] = useState('')
+
     // ===== NEW GAME FORM =====
     const [newGameForm, setNewGameForm] = useState({
         date: new Date().toISOString().split('T')[0],
@@ -252,6 +257,36 @@ export default function GamesPage() {
                 await updateGame(gameId, { runsAgainst: game.runsAgainst - 1 })
             }
         }
+    }
+
+    // ===== SUBSTITUTION HANDLER =====
+    const handleSubstitution = async () => {
+        if (!showSubModal || !subPlayerOut || !subPlayerIn) return
+        const game = games.find(g => g.id === showSubModal)
+        if (!game) return
+
+        // Replace player in batting order
+        const newOrder = (game.battingOrder || []).map(id => id === subPlayerOut ? subPlayerIn : id)
+        // Replace player in positions
+        const newPositions = { ...game.positions || {} }
+        const outPos = newPositions[subPlayerOut]
+        if (outPos) {
+            delete newPositions[subPlayerOut]
+            newPositions[subPlayerIn] = outPos
+        }
+
+        await addGameEvent(showSubModal, {
+            inning: activeInning,
+            half: activeHalf,
+            eventType: 'substitution',
+            playerId: subPlayerIn,
+            replacedPlayerId: subPlayerOut,
+        })
+        await updateGame(showSubModal, { battingOrder: newOrder, positions: newPositions })
+
+        setShowSubModal(null)
+        setSubPlayerOut('')
+        setSubPlayerIn('')
     }
 
     const toggleExpand = (gameId) => {
@@ -518,6 +553,14 @@ export default function GamesPage() {
                                                                 ))}
                                                             </div>
 
+                                                            {/* Substitution button */}
+                                                            <button
+                                                                onClick={() => { setShowSubModal(game.id); setSubPlayerOut(''); setSubPlayerIn('') }}
+                                                                className="w-full mb-3 py-2 px-3 rounded-xl text-sm font-bold bg-purple-500/15 text-purple-300 border border-purple-500/20 hover:bg-purple-500/25 transition-all flex items-center justify-center gap-2"
+                                                            >
+                                                                🔄 Cambio de Jugador
+                                                            </button>
+
                                                             {/* Per-player stat buttons */}
                                                             <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2 mt-2">Registrar por jugador</h4>
                                                             <div className="space-y-1.5 mb-2">
@@ -602,12 +645,16 @@ export default function GamesPage() {
                                                         <div className="space-y-1.5">
                                                             {getHalfEvents(game, activeInning, 'offense').map(event => {
                                                                 const player = event.playerId ? getPlayer(event.playerId) : null
+                                                                const replacedPlayer = event.replacedPlayerId ? getPlayer(event.replacedPlayerId) : null
                                                                 const info = getEventInfo(event.eventType)
                                                                 return (
                                                                     <div key={event.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/3">
                                                                         <span className="text-sm">{info.emoji}</span>
                                                                         <span className="text-xs font-medium text-white flex-1">
-                                                                            {player ? `#${player.number} ${player.name}` : '—'} → {info.label}
+                                                                            {event.eventType === 'substitution' && replacedPlayer
+                                                                                ? <><span className="text-red-300">#{replacedPlayer.number} {replacedPlayer.name}</span><span className="text-text-muted mx-1">→</span><span className="text-green-300">#{player?.number} {player?.name}</span></>
+                                                                                : <>{player ? `#${player.number} ${player.name}` : '—'} → {info.label}</>
+                                                                            }
                                                                         </span>
                                                                         <button onClick={() => handleDeleteEvent(game.id, event)} className="p-1 text-text-muted hover:text-red-400 transition-colors">
                                                                             <X size={12} />
@@ -688,6 +735,14 @@ export default function GamesPage() {
                                                         No hay jugadores en el roster para esta jornada.
                                                     </div>
                                                 )}
+
+                                                {/* Substitution button – Defense */}
+                                                <button
+                                                    onClick={() => { setShowSubModal(game.id); setSubPlayerOut(''); setSubPlayerIn('') }}
+                                                    className="w-full mb-4 py-2 px-3 rounded-xl text-sm font-bold bg-purple-500/15 text-purple-300 border border-purple-500/20 hover:bg-purple-500/25 transition-all flex items-center justify-center gap-2"
+                                                >
+                                                    🔄 Cambio de Jugador
+                                                </button>
 
                                                 {/* General defense events */}
                                                 <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">
@@ -974,6 +1029,88 @@ export default function GamesPage() {
                         Registrar
                     </button>
                 </div>
+            </Modal>
+
+            {/* Substitution modal */}
+            <Modal
+                isOpen={!!showSubModal}
+                onClose={() => { setShowSubModal(null); setSubPlayerOut(''); setSubPlayerIn('') }}
+                title="🔄 Cambio de Jugador"
+            >
+                {showSubModal && (() => {
+                    const game = games.find(g => g.id === showSubModal)
+                    const currentRoster = (game?.battingOrder || []).map(id => getPlayer(id)).filter(Boolean)
+                    const benchPlayers = players.filter(p => !(game?.battingOrder || []).includes(p.id))
+                    return (
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-medium text-text-muted mb-2 uppercase tracking-wider">🚪 Jugador que SALE</label>
+                                <div className="space-y-1 max-h-48 overflow-y-auto">
+                                    {currentRoster.map(player => (
+                                        <button
+                                            key={player.id}
+                                            onClick={() => setSubPlayerOut(player.id)}
+                                            className={`w-full flex items-center gap-2 p-2.5 rounded-lg transition-colors text-left ${subPlayerOut === player.id
+                                                ? 'bg-red-500/20 border border-red-500/30'
+                                                : 'bg-white/5 hover:bg-white/10 border border-transparent'
+                                                }`}
+                                        >
+                                            <span className="text-xs font-bold text-primary" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{player.number || '?'}</span>
+                                            <span className="flex-1 text-sm text-white">{player.name}</span>
+                                            <span className="text-[10px] text-text-muted">{player.position}</span>
+                                            {subPlayerOut === player.id && <span className="text-red-400 text-xs font-bold">SALE</span>}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-medium text-text-muted mb-2 uppercase tracking-wider">🟢 Jugador que ENTRA (Banca)</label>
+                                {benchPlayers.length === 0 ? (
+                                    <p className="text-xs text-text-muted text-center py-4 bg-white/3 rounded-xl">No hay jugadores en banca disponibles.</p>
+                                ) : (
+                                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                                        {benchPlayers.map(player => (
+                                            <button
+                                                key={player.id}
+                                                onClick={() => setSubPlayerIn(player.id)}
+                                                className={`w-full flex items-center gap-2 p-2.5 rounded-lg transition-colors text-left ${subPlayerIn === player.id
+                                                    ? 'bg-green-500/20 border border-green-500/30'
+                                                    : 'bg-white/5 hover:bg-white/10 border border-transparent'
+                                                    }`}
+                                            >
+                                                <span className="text-xs font-bold text-primary" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{player.number || '?'}</span>
+                                                <span className="flex-1 text-sm text-white">{player.name}</span>
+                                                <span className="text-[10px] text-text-muted">{player.position}</span>
+                                                {subPlayerIn === player.id && <span className="text-green-400 text-xs font-bold">ENTRA</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {subPlayerOut && subPlayerIn && (() => {
+                                const out = getPlayer(subPlayerOut)
+                                const inn = getPlayer(subPlayerIn)
+                                return (
+                                    <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 text-sm">
+                                        <span className="text-red-300 font-bold">#{out?.number} {out?.name}</span>
+                                        <span className="text-text-muted mx-2">→</span>
+                                        <span className="text-green-300 font-bold">#{inn?.number} {inn?.name}</span>
+                                    </div>
+                                )
+                            })()}
+
+                            <button
+                                onClick={handleSubstitution}
+                                disabled={!subPlayerOut || !subPlayerIn}
+                                className="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                Confirmar Cambio
+                            </button>
+                        </div>
+                    )
+                })()}
             </Modal>
 
             {/* Delete confirmation */}
