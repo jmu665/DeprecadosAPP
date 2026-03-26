@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react'
-import { useData, POSITIONS, calcPlayerStars, calcPlayerAvg, formatAvg } from '../utils/DataContext'
+import React, { useState } from 'react'
+import { useData, POSITIONS, FIELD_COORDS, calcPlayerStars, calcPlayerAvg, formatAvg, countAssignedPositions, getPlayerAssignedPosition } from '../utils/DataContext'
 import BaseballField from '../components/BaseballField'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Printer, Eye, CalendarDays, ChevronDown, ChevronUp, GripVertical, ArrowUp, ArrowDown, Users, Crown, X } from 'lucide-react'
+import { Plus, Trash2, Printer, CalendarDays, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Users, Crown, X } from 'lucide-react'
 
 export default function LineupsPage() {
     const { players, lineups, addLineup, updateLineup, deleteLineup, getPlayer } = useData()
@@ -13,17 +13,18 @@ export default function LineupsPage() {
     const [createStep, setCreateStep] = useState(1) // 1=info, 2=batting order
     const [battingOrderDraft, setBattingOrderDraft] = useState([])
     const [positionsDraft, setPositionsDraft] = useState({})
-    const printRef = useRef()
 
     // Edit batting order state
     const [editLineupId, setEditLineupId] = useState(null)
     const [editOrder, setEditOrder] = useState([])
     const [editPositions, setEditPositions] = useState({})
 
+    const getPositionShort = (positionId) => POSITIONS.find(position => position.id === positionId)?.short || positionId || ''
+
     const openEditOrder = (lineup) => {
         setEditLineupId(lineup.id)
         setEditOrder([...(lineup.battingOrder || [])])
-        setEditPositions({ ...(lineup.positions || {}) })
+        setEditPositions({ ...(lineup.playerPositions || {}) })
     }
 
     const closeEditOrder = () => {
@@ -57,7 +58,7 @@ export default function LineupsPage() {
     }
 
     const saveEditOrder = () => {
-        updateLineup(editLineupId, { battingOrder: editOrder, positions: editPositions })
+        updateLineup(editLineupId, { battingOrder: editOrder, playerPositions: editPositions })
         closeEditOrder()
     }
 
@@ -141,7 +142,7 @@ export default function LineupsPage() {
             ...newLineup,
             name: newLineup.name || `Lineup ${(lineups?.length || 0) + 1}`,
             battingOrder: battingOrderDraft,
-            positions: positionsDraft,
+            playerPositions: positionsDraft,
         })
         resetCreateModal()
     }
@@ -158,16 +159,35 @@ export default function LineupsPage() {
         }
 
         const printWindow = window.open('', '_blank')
+        if (!printWindow) return
+
         const positions = lineup.positions || {}
-        const positionsList = Object.entries(positions).map(([posId, playerId]) => {
+        const positionsList = POSITIONS
+            .filter(position => positions[position.id])
+            .map(pos => {
+                const player = getPlayer(positions[pos.id])
+                return { position: pos.label || pos.id, short: pos.short || pos.id, player }
+            })
+
+        const fieldMapHtml = Object.entries(FIELD_COORDS).map(([posId, coords]) => {
+            const playerId = positions[posId]
             const player = getPlayer(playerId)
             const posInfo = POSITIONS.find(p => p.id === posId)
-            return { position: posInfo?.label || posId, short: posInfo?.short || posId, player }
-        })
+            return `
+                <div class="field-marker" style="top:${coords.top}; left:${coords.left};">
+                    <div class="field-dot ${player ? 'occupied' : ''}">
+                        ${player ? (player.number || posInfo?.short || posId) : (posInfo?.short || posId)}
+                    </div>
+                    <div class="field-label">${posInfo?.short || posId}</div>
+                    <div class="field-name">${player ? player.name.split(' ')[0] : 'Vacante'}</div>
+                </div>
+            `
+        }).join('')
 
         const battingOrderList = (lineup.battingOrder || []).map((playerId, idx) => {
             const player = getPlayer(playerId)
-            return { order: idx + 1, player }
+            const assignedPosition = getPlayerAssignedPosition(lineup, playerId, players)
+            return { order: idx + 1, player, assignedPosition: getPositionShort(assignedPosition) }
         })
 
         printWindow.document.write(`
@@ -192,6 +212,14 @@ export default function LineupsPage() {
           .stars-container .star-inactive { color: #e5e7eb; font-size: 12px; }
           .stars-container .star-text { font-size: 10px; color: #9ca3af; font-style: italic; }
           .player-name-cell { display: flex; flex-direction: column; gap: 2px; }
+          .field-wrap { position: relative; height: 430px; max-width: 520px; margin: 0 auto; page-break-inside: avoid; }
+          .field-svg { width: 100%; height: 100%; display: block; }
+          .field-marker { position: absolute; transform: translate(-50%, -50%); width: 86px; text-align: center; }
+          .field-dot { width: 42px; height: 42px; border-radius: 999px; margin: 0 auto 4px; display: flex; align-items: center; justify-content: center; background: #F3F4F6; color: #6B7280; border: 2px solid #D1D5DB; font-weight: 800; font-size: 13px; }
+          .field-dot.occupied { background: #DC2626; color: white; border-color: #B91C1C; }
+          .field-label { font-size: 10px; font-weight: 800; color: #374151; text-transform: uppercase; letter-spacing: 0.08em; }
+          .field-name { font-size: 11px; color: #6B7280; margin-top: 2px; }
+          .pos-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; padding: 2px 6px; border-radius: 999px; background: #FEE2E2; color: #B91C1C; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
           .footer { text-align: center; margin-top: 40px; color: #999; font-size: 11px; }
         </style>
       </head>
@@ -202,6 +230,29 @@ export default function LineupsPage() {
           <div class="meta">
             <strong>${lineup.name}</strong><br/>
             ${lineup.date} ${lineup.opponent ? `| vs ${lineup.opponent}` : ''}
+          </div>
+        </div>
+        <div class="section">
+          <h2>Mapa del Campo</h2>
+          <div class="field-wrap">
+            <svg viewBox="0 0 400 400" class="field-svg">
+              <path d="M200 380 L10 140 A240 240 0 0 1 390 140 Z" fill="#1B5E20" opacity="0.75" />
+              <path d="M200 340 L120 240 L200 170 L280 240 Z" fill="#8D6E63" opacity="0.65" />
+              <circle cx="200" cy="255" r="35" fill="#2E7D32" opacity="0.65" />
+              <line x1="200" y1="340" x2="120" y2="240" stroke="rgba(255,255,255,0.55)" stroke-width="2" />
+              <line x1="120" y1="240" x2="200" y2="170" stroke="rgba(255,255,255,0.55)" stroke-width="2" />
+              <line x1="200" y1="170" x2="280" y2="240" stroke="rgba(255,255,255,0.55)" stroke-width="2" />
+              <line x1="280" y1="240" x2="200" y2="340" stroke="rgba(255,255,255,0.55)" stroke-width="2" />
+              <rect x="194" y="334" width="12" height="12" fill="white" transform="rotate(45 200 340)" />
+              <rect x="114" y="234" width="12" height="12" fill="white" transform="rotate(45 120 240)" />
+              <rect x="194" y="164" width="12" height="12" fill="white" transform="rotate(45 200 170)" />
+              <rect x="274" y="234" width="12" height="12" fill="white" transform="rotate(45 280 240)" />
+              <circle cx="200" cy="255" r="5" fill="#6D4C41" />
+              <line x1="200" y1="340" x2="10" y2="140" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" />
+              <line x1="200" y1="340" x2="390" y2="140" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" />
+              <path d="M10 140 A240 240 0 0 1 390 140" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5" />
+            </svg>
+            ${fieldMapHtml}
           </div>
         </div>
         <div class="section">
@@ -228,11 +279,12 @@ export default function LineupsPage() {
         <div class="section">
           <h2>Orden al Bat</h2>
           <table>
-            <thead><tr><th>#</th><th>Num</th><th>Jugador</th></tr></thead>
+            <thead><tr><th>#</th><th>Pos</th><th>Num</th><th>Jugador</th></tr></thead>
             <tbody>
-              ${battingOrderList.map(({ order, player }) => `
+              ${battingOrderList.map(({ order, player, assignedPosition }) => `
                 <tr>
                   <td><strong>${order}</strong></td>
+                  <td>${assignedPosition ? `<span class="pos-chip">${assignedPosition}</span>` : '-'}</td>
                   <td class="number">${player?.number || '-'}</td>
                   <td>
                     <div class="player-name-cell">
@@ -282,7 +334,7 @@ export default function LineupsPage() {
                     {[...(lineups || [])].reverse().map((lineup, i) => {
                         const isExpanded = expandedId === lineup.id
                         const positions = lineup.positions || {}
-                        const assignedCount = Object.keys(positions).length
+                        const assignedCount = countAssignedPositions(lineup, players)
 
                         return (
                             <div
@@ -369,6 +421,7 @@ export default function LineupsPage() {
                                                         <div className="space-y-2">
                                                             {lineup.battingOrder.map((playerId, idx) => {
                                                                 const player = getPlayer(playerId)
+                                                                const assignedPosition = getPlayerAssignedPosition(lineup, playerId, players)
                                                                 return (
                                                                     <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white/3">
                                                                         <span className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-xs font-bold text-primary">
@@ -377,7 +430,7 @@ export default function LineupsPage() {
                                                                         <span className="text-sm text-white">
                                                                             {player ? `#${player.number || '?'} ${player.name}` : '—'}
                                                                         </span>
-                                                                        <span className="text-[10px] text-text-muted ml-auto">{lineup.positions?.[playerId] || player?.position || ''}</span>
+                                                                        <span className="text-[10px] text-text-muted ml-auto">{getPositionShort(assignedPosition || player?.position)}</span>
                                                                     </div>
                                                                 )
                                                             })}

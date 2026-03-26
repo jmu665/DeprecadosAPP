@@ -60,7 +60,7 @@ export const apiPlayers = {
                 if (type === 'strikeout') s.strikeouts++
                 if (['single', 'double', 'triple', 'homerun', 'strikeout', 'groundout', 'flyout', 'popout', 'reached_error'].includes(type)) s.atBats++
 
-                if (type === 'run') s.runs++
+                if (type === 'run' || type === 'homerun') s.runs++
                 if (type === 'rbi') s.rbi++
                 if (type === 'stolenbase') s.stolenBases++
                 if (type === 'fielding_error') s.errors++

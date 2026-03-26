@@ -1,7 +1,7 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { Users, LayoutGrid, BarChart3, CalendarDays, ChevronRight, Trophy, Zap, Star, TrendingUp, Medal } from 'lucide-react'
-import { useData, POSITIONS, calcPlayerAvg, formatAvg } from '../utils/DataContext'
+import { useData, POSITIONS, calcPlayerAvg, formatAvg, countAssignedPositions } from '../utils/DataContext'
 
 export default function HomePage() {
     const { players, lineups, games } = useData()
@@ -193,7 +193,7 @@ export default function HomePage() {
                                     </div>
                                 </div>
                                 <div className="text-xs text-text-muted">
-                                    {Object.keys(lineup.positions || {}).length}/9
+                                    {countAssignedPositions(lineup, players)}/9
                                 </div>
                             </Link>
                         ))}

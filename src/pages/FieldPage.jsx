@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { useData, POSITIONS, FIELD_COORDS, calcPlayerAvg, formatAvg } from '../utils/DataContext'
+import { useData, POSITIONS, FIELD_COORDS, calcPlayerAvg, formatAvg, normalizeFieldPositions } from '../utils/DataContext'
 import BaseballField from '../components/BaseballField'
 import Modal from '../components/Modal'
 import { Save, RotateCcw, Star, Users, Lightbulb, Crown, ArrowRightLeft, Calendar, Eye, PlusCircle, ChevronDown, ChevronUp } from 'lucide-react'
@@ -161,43 +161,7 @@ export default function FieldPage() {
 
     // Build positions map from a game's batting order using player primary positions
     const buildGamePositions = (game) => {
-        const pos = {}
-        if (!game?.battingOrder) return pos
-        const used = new Set()
-        const fieldPositions = POSITIONS.filter(p => p.id !== 'DH')
-
-        // First pass: assign to primary position
-        game.battingOrder.forEach(pId => {
-            const player = getPlayer(pId)
-            if (!player) return
-            if (player.position && !used.has(player.position) && fieldPositions.some(fp => fp.id === player.position)) {
-                pos[player.position] = pId
-                used.add(player.position)
-            }
-        })
-
-        // Second pass: assign to secondary position
-        game.battingOrder.forEach(pId => {
-            if (Object.values(pos).includes(pId)) return
-            const player = getPlayer(pId)
-            if (!player) return
-            if (player.secondaryPosition && !used.has(player.secondaryPosition) && fieldPositions.some(fp => fp.id === player.secondaryPosition)) {
-                pos[player.secondaryPosition] = pId
-                used.add(player.secondaryPosition)
-            }
-        })
-
-        // Third pass: assign remaining to any open position
-        game.battingOrder.forEach(pId => {
-            if (Object.values(pos).includes(pId)) return
-            const openPos = fieldPositions.find(fp => !used.has(fp.id))
-            if (openPos) {
-                pos[openPos.id] = pId
-                used.add(openPos.id)
-            }
-        })
-
-        return pos
+        return normalizeFieldPositions(game?.positions, game?.playerPositions, game?.battingOrder || [], players)
     }
 
     const handlePositionClick = (posId) => {

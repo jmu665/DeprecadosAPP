@@ -1,10 +1,25 @@
-import React, { useState, useMemo } from 'react'
-import { useData, POSITIONS, OFFENSE_PA_EVENTS, OFFENSE_EXTRA_EVENTS, DEFENSE_EVENTS, PLATE_APPEARANCE_IDS, OUT_EVENT_IDS, EVENT_TYPES, calcPlayerAvg, formatAvg } from '../utils/DataContext'
+import React, { useState } from 'react'
+import { useData, POSITIONS, PLATE_APPEARANCE_IDS, OUT_EVENT_IDS, EVENT_TYPES, calcPlayerAvg, formatAvg, getPlayerAssignedPosition } from '../utils/DataContext'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Clock, ChevronDown, ChevronUp, Calendar, Shield, Swords, X, Users, ArrowUp, ArrowDown, Lightbulb, Crown } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronUp, Calendar, Shield, Swords, X, Users, ArrowUp, ArrowDown, Lightbulb, Crown } from 'lucide-react'
+
+const QUICK_PA_EVENTS = [
+    { id: 'single', label: 'Hit', emoji: '🟢', tone: 'success' },
+    { id: 'homerun', label: 'HR', emoji: '💥', tone: 'warning' },
+    { id: 'groundout', label: 'Out', emoji: '⚪', tone: 'neutral' },
+    { id: 'strikeout', label: 'Ponche', emoji: '❌', tone: 'danger' },
+]
+
+const EVENT_INFO_OVERRIDES = {
+    single: { label: 'Hit', emoji: '🟢' },
+    homerun: { label: 'Home Run', emoji: '💥' },
+    groundout: { label: 'Out', emoji: '⚪' },
+    strikeout: { label: 'Ponche', emoji: '❌' },
+    run: { label: 'Hizo carrera', emoji: '🏃' },
+}
 
 export default function GamesPage() {
-    const { players, games, lineups, addGame, updateGame, deleteGame, addGameEvent, deleteGameEvent, getPlayer, addLineup } = useData()
+    const { players, games, lineups, addGame, updateGame, deleteGame, addGameEvent, deleteGameEvent, getPlayer } = useData()
     const [expandedGame, setExpandedGame] = useState(null)
     const [showNewGame, setShowNewGame] = useState(false)
     const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -12,10 +27,6 @@ export default function GamesPage() {
     // Current inning and half for expanded game
     const [activeInning, setActiveInning] = useState(1)
     const [activeHalf, setActiveHalf] = useState('defense') // defense first (Top), then offense (Bottom)
-
-    // Extra event modal (for non-PA events where you pick a player)
-    const [showExtraEvent, setShowExtraEvent] = useState(null) // { gameId, eventType, half }
-    const [extraPlayerId, setExtraPlayerId] = useState('')
 
     // Substitution modal
     const [showSubModal, setShowSubModal] = useState(null) // gameId | null
@@ -28,40 +39,28 @@ export default function GamesPage() {
         opponent: '',
         innings: 7,
         notes: '',
+        lineupId: null,
     })
     const [battingOrderDraft, setBattingOrderDraft] = useState([])
     const [positionsDraft, setPositionsDraft] = useState({})
     const [gameStep, setGameStep] = useState(1) // 1=info, 2=batting order
 
     const availableForBatting = players.filter(p => !battingOrderDraft.includes(p.id))
+    const getPositionShort = (positionId) => POSITIONS.find(position => position.id === positionId)?.short || positionId || ''
+    const getPositionLabel = (positionId) => POSITIONS.find(position => position.id === positionId)?.label || positionId || 'Sin posición'
 
     const handleCreateGame = async () => {
         if (battingOrderDraft.length < 1) return
 
-        // Also save as a Lineup in the DB
-        const lineupPositions = {}
-        battingOrderDraft.forEach(pId => {
-            const pos = positionsDraft[pId] || players.find(p => p.id === pId)?.position || 'P'
-            // Map player to their game position  
-            lineupPositions[pos] = lineupPositions[pos] ? lineupPositions[pos] : pId
-        })
-        await addLineup({
-            name: newGameForm.opponent ? `vs ${newGameForm.opponent}` : `Jornada ${games.length + 1}`,
-            date: newGameForm.date,
-            opponent: newGameForm.opponent,
-            positions: positionsDraft,
-            battingOrder: battingOrderDraft,
-        })
-
         await addGame({
             ...newGameForm,
             battingOrder: battingOrderDraft,
-            positions: positionsDraft,
+            playerPositions: positionsDraft,
             currentBatterIndex: 0,
             runsFor: 0,
             runsAgainst: 0,
         })
-        setNewGameForm({ date: new Date().toISOString().split('T')[0], opponent: '', innings: 7, notes: '' })
+        setNewGameForm({ date: new Date().toISOString().split('T')[0], opponent: '', innings: 7, notes: '', lineupId: null })
         setBattingOrderDraft([])
         setPositionsDraft({})
         setGameStep(1)
@@ -162,26 +161,24 @@ export default function GamesPage() {
 
         // Advance to next batter
         const nextIdx = currentIdx + 1
-        await updateGame(gameId, { currentBatterIndex: nextIdx })
+        await updateGame(gameId, {
+            currentBatterIndex: nextIdx,
+            ...(eventType === 'homerun' ? { runsFor: (game.runsFor || 0) + 1 } : {}),
+        })
     }
 
     const handleDefenseEvent = async (gameId, eventType) => {
+        await addGameEvent(gameId, {
+            inning: activeInning,
+            half: 'defense',
+            eventType,
+        })
+
         if (eventType === 'opponent_run') {
-            // No player needed
-            await addGameEvent(gameId, {
-                inning: activeInning,
-                half: 'defense',
-                eventType,
-            })
-            // Auto-increment runs against
             const game = games.find(g => g.id === gameId)
             if (game) {
                 await updateGame(gameId, { runsAgainst: (game.runsAgainst || 0) + 1 })
             }
-        } else {
-            // Need to pick a player (fielding_error or others)
-            setShowExtraEvent({ gameId, eventType, half: 'defense' })
-            setExtraPlayerId('')
         }
     }
 
@@ -195,34 +192,7 @@ export default function GamesPage() {
         })
     }
 
-    const handleExtraOffenseEvent = (gameId, eventType) => {
-        setShowExtraEvent({ gameId, eventType, half: 'offense' })
-        setExtraPlayerId('')
-    }
-
-    const handleSubmitExtraEvent = async () => {
-        if (!showExtraEvent || !extraPlayerId) return
-        await addGameEvent(showExtraEvent.gameId, {
-            inning: activeInning,
-            half: showExtraEvent.half,
-            eventType: showExtraEvent.eventType,
-            playerId: extraPlayerId,
-        })
-
-        // If it's a run scored, auto-increment runsFor
-        if (showExtraEvent.eventType === 'run' && showExtraEvent.half === 'offense') {
-            const game = games.find(g => g.id === showExtraEvent.gameId)
-            if (game) {
-                await updateGame(showExtraEvent.gameId, { runsFor: (game.runsFor || 0) + 1 })
-            }
-        }
-
-        setShowExtraEvent(null)
-        setExtraPlayerId('')
-    }
-
-    // Direct submit without modal — for quick per-player buttons
-    const handleSubmitExtraEventDirect = async (gameId, eventType, playerId) => {
+    const handlePlayerEvent = async (gameId, eventType, playerId) => {
         await addGameEvent(gameId, {
             inning: activeInning,
             half: 'offense',
@@ -237,15 +207,18 @@ export default function GamesPage() {
                 await updateGame(gameId, { runsFor: (game.runsFor || 0) + 1 })
             }
         }
-
-        setShowExtraEvent(null)
-        setExtraPlayerId('')
     }
 
     const handleDeleteEvent = async (gameId, event) => {
         await deleteGameEvent(gameId, event.id)
         // If it was a scored run, decrement
         if (event.eventType === 'run' && event.half === 'offense') {
+            const game = games.find(g => g.id === gameId)
+            if (game && game.runsFor > 0) {
+                await updateGame(gameId, { runsFor: game.runsFor - 1 })
+            }
+        }
+        if (event.eventType === 'homerun' && event.half === 'offense') {
             const game = games.find(g => g.id === gameId)
             if (game && game.runsFor > 0) {
                 await updateGame(gameId, { runsFor: game.runsFor - 1 })
@@ -267,12 +240,16 @@ export default function GamesPage() {
 
         // Replace player in batting order
         const newOrder = (game.battingOrder || []).map(id => id === subPlayerOut ? subPlayerIn : id)
-        // Replace player in positions
+        const currentPositionId = getPlayerAssignedPosition(game, subPlayerOut, players)
         const newPositions = { ...game.positions || {} }
-        const outPos = newPositions[subPlayerOut]
-        if (outPos) {
-            delete newPositions[subPlayerOut]
-            newPositions[subPlayerIn] = outPos
+        if (currentPositionId && newPositions[currentPositionId] === subPlayerOut) {
+            newPositions[currentPositionId] = subPlayerIn
+        }
+        const newPlayerPositions = { ...(game.playerPositions || {}) }
+        const outgoingAssignment = newPlayerPositions[subPlayerOut] || currentPositionId
+        delete newPlayerPositions[subPlayerOut]
+        if (outgoingAssignment) {
+            newPlayerPositions[subPlayerIn] = outgoingAssignment
         }
 
         await addGameEvent(showSubModal, {
@@ -282,7 +259,11 @@ export default function GamesPage() {
             playerId: subPlayerIn,
             replacedPlayerId: subPlayerOut,
         })
-        await updateGame(showSubModal, { battingOrder: newOrder, positions: newPositions })
+        await updateGame(showSubModal, {
+            battingOrder: newOrder,
+            positions: newPositions,
+            playerPositions: newPlayerPositions,
+        })
 
         setShowSubModal(null)
         setSubPlayerOut('')
@@ -310,7 +291,7 @@ export default function GamesPage() {
     }
 
     // Helper to get event info
-    const getEventInfo = (eventType) => EVENT_TYPES.find(e => e.id === eventType) || { label: eventType, emoji: '❓' }
+    const getEventInfo = (eventType) => EVENT_INFO_OVERRIDES[eventType] || EVENT_TYPES.find(e => e.id === eventType) || { label: eventType, emoji: '❓' }
 
     const sortedGames = [...games].sort((a, b) => new Date(b.date) - new Date(a.date))
 
@@ -321,7 +302,13 @@ export default function GamesPage() {
                     <h1 className="text-2xl font-black tracking-tight">Jornadas</h1>
                     <p className="text-text-muted text-sm mt-1">Registro de juegos por innings</p>
                 </div>
-                <button onClick={() => { setShowNewGame(true); setGameStep(1); setBattingOrderDraft([]) }} className="btn-primary flex items-center gap-2 w-fit">
+                <button onClick={() => {
+                    setShowNewGame(true)
+                    setGameStep(1)
+                    setBattingOrderDraft([])
+                    setPositionsDraft({})
+                    setNewGameForm({ date: new Date().toISOString().split('T')[0], opponent: '', innings: 7, notes: '', lineupId: null })
+                }} className="btn-primary flex items-center gap-2 w-fit">
                     <Plus size={18} /> Nueva Jornada
                 </button>
             </div>
@@ -454,7 +441,8 @@ export default function GamesPage() {
                                                                     const player = getPlayer(pId)
                                                                     if (!player) return null
                                                                     const isCurrent = idx === (game.currentBatterIndex % game.battingOrder.length)
-                                                                    const posInfo = POSITIONS.find(p => p.id === player.position)
+                                                                    const assignedPosition = getPlayerAssignedPosition(game, pId, players)
+                                                                    const posInfo = POSITIONS.find(p => p.id === assignedPosition) || POSITIONS.find(p => p.id === player.position)
 
                                                                     // Check what happened to this batter in this inning
                                                                     const batEvents = getHalfEvents(game, activeInning, 'offense')
@@ -475,7 +463,7 @@ export default function GamesPage() {
                                                                                 <div className={`text-sm font-medium truncate ${isCurrent ? 'text-white' : 'text-white/70'}`}>
                                                                                     #{player.number} {player.name}
                                                                                 </div>
-                                                                                <div className="text-[10px] text-text-muted">{posInfo?.short} · {formatAvg(calcPlayerAvg(player))}</div>
+                                                                                <div className="text-[10px] text-text-muted">{getPositionShort(assignedPosition || player.position)} · {formatAvg(calcPlayerAvg(player))}</div>
                                                                             </div>
                                                                             {isCurrent && (
                                                                                 <span className="text-xs font-bold text-primary animate-pulse">AL BAT</span>
@@ -505,6 +493,7 @@ export default function GamesPage() {
                                                                 const cIdx = game.currentBatterIndex % (game.battingOrder?.length || 1)
                                                                 const currentBatter = getPlayer(game.battingOrder?.[cIdx])
                                                                 const outsInInning = countOuts(game, activeInning, 'offense')
+                                                                const assignedPositionId = currentBatter ? getPlayerAssignedPosition(game, currentBatter.id, players) : ''
 
                                                                 return (
                                                                     <div className="mb-4">
@@ -515,7 +504,7 @@ export default function GamesPage() {
                                                                                     #{currentBatter.number} {currentBatter.name}
                                                                                 </div>
                                                                                 <div className="text-xs text-text-muted">
-                                                                                    {POSITIONS.find(p => p.id === currentBatter.position)?.label} · AVG: {formatAvg(calcPlayerAvg(currentBatter))}
+                                                                                    {getPositionLabel(assignedPositionId || currentBatter.position)} · AVG: {formatAvg(calcPlayerAvg(currentBatter))}
                                                                                 </div>
                                                                             </div>
                                                                         )}
@@ -535,16 +524,20 @@ export default function GamesPage() {
                                                             })()}
 
                                                             {/* PA event buttons */}
-                                                            <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">Resultado del turno al bat</h4>
-                                                            <div className="grid grid-cols-3 gap-1.5 mb-4">
-                                                                {OFFENSE_PA_EVENTS.map(evt => (
+                                                            <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">Resultado rápido del turno</h4>
+                                                            <div className="grid grid-cols-2 gap-1.5 mb-4 sm:grid-cols-4">
+                                                                {QUICK_PA_EVENTS.map(evt => (
                                                                     <button
                                                                         key={evt.id}
                                                                         onClick={() => handlePAEvent(game.id, evt.id)}
                                                                         className={`p-2 rounded-lg text-xs font-medium transition-all text-center
-                                                                            ${evt.isOut
+                                                                            ${evt.tone === 'danger'
                                                                                 ? 'bg-red-500/10 text-red-300 border border-red-500/15 hover:bg-red-500/20'
-                                                                                : 'bg-green-500/10 text-green-300 border border-green-500/15 hover:bg-green-500/20'
+                                                                                : evt.tone === 'warning'
+                                                                                    ? 'bg-yellow-500/10 text-yellow-300 border border-yellow-500/15 hover:bg-yellow-500/20'
+                                                                                : evt.tone === 'neutral'
+                                                                                    ? 'bg-white/10 text-white border border-white/10 hover:bg-white/15'
+                                                                                    : 'bg-green-500/10 text-green-300 border border-green-500/15 hover:bg-green-500/20'
                                                                             }`}
                                                                     >
                                                                         <span className="text-base">{evt.emoji}</span>
@@ -562,17 +555,16 @@ export default function GamesPage() {
                                                             </button>
 
                                                             {/* Per-player stat buttons */}
-                                                            <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2 mt-2">Registrar por jugador</h4>
+                                                            <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2 mt-2">Registrar carrera por jugador</h4>
                                                             <div className="space-y-1.5 mb-2">
                                                                 {game.battingOrder?.map((pId, idx) => {
                                                                     const player = getPlayer(pId)
                                                                     if (!player) return null
-                                                                    const posInfo = POSITIONS.find(p => p.id === player.position)
+                                                                    const assignedPosition = getPlayerAssignedPosition(game, pId, players)
+                                                                    const posInfo = POSITIONS.find(p => p.id === assignedPosition) || POSITIONS.find(p => p.id === player.position)
 
                                                                     // Count stats for this player in this game
                                                                     const gameRuns = (game.events || []).filter(e => e.playerId === pId && e.eventType === 'run').length
-                                                                    const gameRBI = (game.events || []).filter(e => e.playerId === pId && e.eventType === 'rbi').length
-                                                                    const gameSB = (game.events || []).filter(e => e.playerId === pId && e.eventType === 'stolenbase').length
 
                                                                     return (
                                                                         <div
@@ -590,37 +582,21 @@ export default function GamesPage() {
                                                                                             {player.name}
                                                                                         </div>
                                                                                         <div className="text-[10px] text-text-muted">
-                                                                                            {posInfo?.short} · {formatAvg(calcPlayerAvg(player))}
+                                                                                            {getPositionShort(assignedPosition || player.position)} · {formatAvg(calcPlayerAvg(player))}
                                                                                         </div>
                                                                                     </div>
                                                                                     <div className="text-[10px] font-black text-right min-w-[50px]">
                                                                                         {gameRuns > 0 && <span className="text-green-400 block">{gameRuns} R</span>}
-                                                                                        {gameRBI > 0 && <span className="text-yellow-400 block">{gameRBI} RBI</span>}
-                                                                                        {gameSB > 0 && <span className="text-blue-400 block">{gameSB} SB</span>}
                                                                                     </div>
                                                                                 </div>
                                                                             </div>
                                                                             <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1 hide-scrollbar">
                                                                                 <button
-                                                                                    onClick={() => handleSubmitExtraEventDirect(game.id, 'run', pId)}
+                                                                                    onClick={() => handlePlayerEvent(game.id, 'run', pId)}
                                                                                     className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-green-500/15 text-green-300 border border-green-500/20 hover:bg-green-500/30 transition-all flex items-center gap-1"
-                                                                                    title="Carrera anotada"
+                                                                                    title="Registrar carrera anotada"
                                                                                 >
-                                                                                    🏃 +1 Run (R)
-                                                                                </button>
-                                                                                <button
-                                                                                    onClick={() => handleSubmitExtraEventDirect(game.id, 'rbi', pId)}
-                                                                                    className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-yellow-500/15 text-yellow-300 border border-yellow-500/20 hover:bg-yellow-500/30 transition-all flex items-center gap-1"
-                                                                                    title="Carrera impulsada"
-                                                                                >
-                                                                                    💪 +1 Impulsa (RBI)
-                                                                                </button>
-                                                                                <button
-                                                                                    onClick={() => handleSubmitExtraEventDirect(game.id, 'stolenbase', pId)}
-                                                                                    className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/20 hover:bg-blue-500/30 transition-all flex items-center gap-1"
-                                                                                    title="Base robada"
-                                                                                >
-                                                                                    ⚡ Robo (SB)
+                                                                                    🏃 Hizo carrera
                                                                                 </button>
                                                                             </div>
                                                                         </div>
@@ -681,7 +657,8 @@ export default function GamesPage() {
                                                         {game.battingOrder.map((pId, idx) => {
                                                             const player = getPlayer(pId)
                                                             if (!player) return null
-                                                            const posInfo = POSITIONS.find(p => p.id === player.position)
+                                                            const assignedPosition = getPlayerAssignedPosition(game, pId, players)
+                                                            const posInfo = POSITIONS.find(p => p.id === assignedPosition) || POSITIONS.find(p => p.id === player.position)
 
                                                             // Count errors for this player in this ENTIRE game
                                                             const gameErrors = (game.events || []).filter(
@@ -701,14 +678,14 @@ export default function GamesPage() {
                                                                 >
                                                                     <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black bg-blue-500/15 text-blue-300"
                                                                         style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-                                                                        {game.positions?.[pId] || posInfo?.short || '?'}
+                                                                        {getPositionShort(assignedPosition || posInfo?.short)}
                                                                     </div>
                                                                     <div className="flex-1 min-w-0">
                                                                         <div className="text-sm font-medium text-white truncate">
                                                                             #{player.number} {player.name}
                                                                         </div>
                                                                         <div className="text-[10px] text-text-muted">
-                                                                            {posInfo?.label || (game.positions?.[pId] || 'Sin posición')}
+                                                                            {getPositionLabel(assignedPosition || posInfo?.id)}
                                                                             {gameErrors > 0 && (
                                                                                 <span className="text-red-400 font-bold ml-2">
                                                                                     {gameErrors} E en este juego
@@ -863,7 +840,13 @@ export default function GamesPage() {
             {/* ===== NEW GAME MODAL ===== */}
             <Modal
                 isOpen={showNewGame}
-                onClose={() => { setShowNewGame(false); setGameStep(1); setBattingOrderDraft([]); setPositionsDraft({}) }}
+                onClose={() => {
+                    setShowNewGame(false)
+                    setGameStep(1)
+                    setBattingOrderDraft([])
+                    setPositionsDraft({})
+                    setNewGameForm({ date: new Date().toISOString().split('T')[0], opponent: '', innings: 7, notes: '', lineupId: null })
+                }}
                 title={gameStep === 1 ? 'Nueva Jornada' : 'Orden al Bat'}
             >
                 {gameStep === 1 ? (
@@ -879,17 +862,21 @@ export default function GamesPage() {
                                     defaultValue=""
                                     onChange={e => {
                                         const lineup = lineups.find(l => l.id === e.target.value)
-                                        if (!lineup) return
+                                        if (!lineup) {
+                                            setNewGameForm(prev => ({ ...prev, lineupId: null }))
+                                            return
+                                        }
                                         // Pre-fill game info from lineup
                                         setNewGameForm(prev => ({
                                             ...prev,
                                             opponent: lineup.opponent || prev.opponent,
                                             date: lineup.date || prev.date,
+                                            lineupId: lineup.id,
                                         }))
                                         // Pre-fill batting order and positions
                                         if (lineup.battingOrder?.length > 0) {
                                             setBattingOrderDraft(lineup.battingOrder)
-                                            setPositionsDraft(lineup.positions || {})
+                                            setPositionsDraft(lineup.playerPositions || {})
                                         }
                                     }}
                                 >
@@ -1034,41 +1021,6 @@ export default function GamesPage() {
                         </div>
                     </div>
                 )}
-            </Modal>
-
-            {/* Extra event modal (pick player) */}
-            <Modal
-                isOpen={!!showExtraEvent}
-                onClose={() => { setShowExtraEvent(null); setExtraPlayerId('') }}
-                title={showExtraEvent ? `${getEventInfo(showExtraEvent.eventType)?.emoji} ${getEventInfo(showExtraEvent.eventType)?.label}` : ''}
-            >
-                <div className="space-y-4">
-                    <p className="text-sm text-text-muted">Selecciona el jugador:</p>
-                    <div className="space-y-1 max-h-64 overflow-y-auto">
-                        {(showExtraEvent?.half === 'offense' && expandedGame
-                            ? (games.find(g => g.id === expandedGame)?.battingOrder || []).map(id => players.find(p => p.id === id)).filter(Boolean)
-                            : players
-                        ).map(player => (
-                            <button
-                                key={player.id}
-                                onClick={() => setExtraPlayerId(player.id)}
-                                className={`w-full flex items-center gap-2 p-2.5 rounded-lg transition-colors text-left
-                                    ${extraPlayerId === player.id ? 'bg-primary/20 border border-primary/30' : 'bg-white/5 hover:bg-white/10 border border-transparent'}`}
-                            >
-                                <span className="text-xs font-bold" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>{player.number || '?'}</span>
-                                <span className="flex-1 text-sm text-white">{player.name}</span>
-                                <span className="text-[10px] text-text-muted">{player.position}</span>
-                            </button>
-                        ))}
-                    </div>
-                    <button
-                        onClick={handleSubmitExtraEvent}
-                        disabled={!extraPlayerId}
-                        className="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                        Registrar
-                    </button>
-                </div>
             </Modal>
 
             {/* Substitution modal */}

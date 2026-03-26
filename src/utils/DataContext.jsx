@@ -71,6 +71,144 @@ export const FIELD_COORDS = {
     'RF': { top: '22%', left: '78%' },
 }
 
+const POSITION_ID_SET = new Set(POSITIONS.map(position => position.id))
+const POSITION_ID_ORDER = POSITIONS.map(position => position.id)
+const BENCH_ASSIGNMENTS = new Set(['Banca'])
+
+const normalizeAssignmentValue = (value) => {
+    if (typeof value !== 'string') return ''
+
+    const normalized = value.trim()
+    if (!normalized) return ''
+    if (normalized === 'BD') return 'DH'
+
+    return normalized
+}
+
+const normalizeStringMap = (value) => {
+    if (!value || typeof value !== 'object') return {}
+
+    return Object.entries(value).reduce((acc, [key, rawValue]) => {
+        const normalizedValue = normalizeAssignmentValue(rawValue)
+        if (!key || !normalizedValue) return acc
+        acc[key] = normalizedValue
+        return acc
+    }, {})
+}
+
+export function normalizePlayerPositions(positions = {}, playerPositions = {}) {
+    const explicitAssignments = normalizeStringMap(playerPositions)
+    if (Object.keys(explicitAssignments).length > 0) return explicitAssignments
+
+    const normalizedPositions = normalizeStringMap(positions)
+    const looksLikeFieldMap = Object.keys(normalizedPositions).some(key => POSITION_ID_SET.has(key))
+    if (!looksLikeFieldMap) return normalizedPositions
+
+    return Object.entries(normalizedPositions).reduce((acc, [positionId, playerId]) => {
+        if (POSITION_ID_SET.has(positionId) && playerId) {
+            acc[playerId] = positionId
+        }
+        return acc
+    }, {})
+}
+
+export function buildFieldPositionsFromAssignments(battingOrder = [], players = [], playerPositions = {}) {
+    const normalizedAssignments = normalizeStringMap(playerPositions)
+    const playerMap = new Map((players || []).map(player => [player.id, player]))
+    const fieldPositions = {}
+    const usedPositions = new Set()
+    const placedPlayers = new Set()
+    const orderedPlayers = (battingOrder || []).filter(Boolean)
+
+    const placePlayer = (playerId, rawPositionId) => {
+        const positionId = normalizeAssignmentValue(rawPositionId)
+        if (!playerId || !POSITION_ID_SET.has(positionId) || usedPositions.has(positionId)) return false
+
+        fieldPositions[positionId] = playerId
+        usedPositions.add(positionId)
+        placedPlayers.add(playerId)
+        return true
+    }
+
+    orderedPlayers.forEach(playerId => {
+        const assignment = normalizedAssignments[playerId]
+        if (BENCH_ASSIGNMENTS.has(assignment)) return
+        placePlayer(playerId, assignment)
+    })
+
+    orderedPlayers.forEach(playerId => {
+        if (placedPlayers.has(playerId)) return
+
+        const assignment = normalizedAssignments[playerId]
+        if (BENCH_ASSIGNMENTS.has(assignment)) return
+
+        const player = playerMap.get(playerId)
+        if (placePlayer(playerId, player?.position)) return
+        placePlayer(playerId, player?.secondaryPosition)
+    })
+
+    orderedPlayers.forEach(playerId => {
+        if (placedPlayers.has(playerId)) return
+
+        const assignment = normalizedAssignments[playerId]
+        if (BENCH_ASSIGNMENTS.has(assignment)) return
+
+        const openPosition = POSITION_ID_ORDER.find(positionId => !usedPositions.has(positionId))
+        if (openPosition) {
+            placePlayer(playerId, openPosition)
+        }
+    })
+
+    return fieldPositions
+}
+
+export function normalizeFieldPositions(positions = {}, playerPositions = {}, battingOrder = [], players = []) {
+    const normalizedPositions = normalizeStringMap(positions)
+    const directFieldMap = Object.entries(normalizedPositions).reduce((acc, [positionId, playerId]) => {
+        if (POSITION_ID_SET.has(positionId) && playerId) {
+            acc[positionId] = playerId
+        }
+        return acc
+    }, {})
+
+    if (Object.keys(directFieldMap).length > 0) return directFieldMap
+
+    const assignments = normalizePlayerPositions(positions, playerPositions)
+    const orderedPlayers = (battingOrder || []).length > 0 ? battingOrder : Object.keys(assignments)
+    return buildFieldPositionsFromAssignments(orderedPlayers, players, assignments)
+}
+
+export function normalizeRosterRecord(record = {}, players = []) {
+    const battingOrder = record?.battingOrder || []
+    const playerPositions = normalizePlayerPositions(record?.positions, record?.playerPositions)
+    const positions = normalizeFieldPositions(record?.positions, playerPositions, battingOrder, players)
+
+    return {
+        ...record,
+        positions,
+        playerPositions: {
+            ...Object.fromEntries(Object.entries(positions).map(([positionId, playerId]) => [playerId, positionId])),
+            ...playerPositions,
+        },
+    }
+}
+
+export function countAssignedPositions(record = {}, players = []) {
+    return Object.keys(
+        normalizeFieldPositions(record?.positions, record?.playerPositions, record?.battingOrder || [], players)
+    ).length
+}
+
+export function getPlayerAssignedPosition(record = {}, playerId, players = []) {
+    if (!playerId) return ''
+
+    const playerPositions = normalizePlayerPositions(record?.positions, record?.playerPositions)
+    if (playerPositions[playerId]) return playerPositions[playerId]
+
+    const positions = normalizeFieldPositions(record?.positions, playerPositions, record?.battingOrder || [], players)
+    return Object.entries(positions).find(([, assignedPlayerId]) => assignedPlayerId === playerId)?.[0] || ''
+}
+
 export function calcPlayerAvg(player) {
     if (!player?.stats?.atBats || player.stats.atBats === 0) return 0
     return player.stats.hits / player.stats.atBats
@@ -90,32 +228,41 @@ export function calcPlayerScore(player) {
     const doubles = s.doubles || 0
     const triples = s.triples || 0
     const hr = s.homeRuns || 0
-    const singles = hits - doubles - triples - hr
+    const singles = Math.max(0, hits - doubles - triples - hr)
     const pa = ab + walks
     const avg = ab > 0 ? hits / ab : 0
     const obp = pa > 0 ? (hits + walks) / pa : 0
     const slg = ab > 0 ? (singles + doubles * 2 + triples * 3 + hr * 4) / ab : 0
-    return avg * 0.4 + obp * 0.3 + slg * 0.3
+    const rawScore = avg * 0.5 + obp * 0.2 + slg * 0.3
+
+    // Regress to a baseline so a tiny sample does not inflate the rating.
+    const baselineScore = 0.24
+    const sampleFactor = Math.min(ab / 25, 1)
+
+    return baselineScore + (rawScore - baselineScore) * sampleFactor
 }
 
 export function calcPlayerStars(player) {
     const s = player?.stats || {}
     const ab = s.atBats || 0
-    if (ab < 1) return 0 // No stars if no at-bats yet
+    if (ab < 3) return 0 // Too little data to rate reliably
 
     const score = calcPlayerScore(player)
+    let stars = 1
 
-    // Thresholds based on recreational/amateur baseball:
-    // .400+ composite = 5 stars (elite)
-    // .300-.399 = 4 stars (great)
-    // .200-.299 = 3 stars (average)
-    // .100-.199 = 2 stars (below average)
-    // <.100 = 1 star
-    if (score >= 0.400) return 5
-    if (score >= 0.300) return 4
-    if (score >= 0.200) return 3
-    if (score >= 0.100) return 2
-    return 1
+    if (score >= 0.38) stars = 5
+    else if (score >= 0.32) stars = 4
+    else if (score >= 0.26) stars = 3
+    else if (score >= 0.20) stars = 2
+
+    // Cap the ceiling until the player has a meaningful sample.
+    const maxStarsBySample =
+        ab >= 25 ? 5 :
+            ab >= 15 ? 4 :
+                ab >= 8 ? 3 :
+                    2
+
+    return Math.min(stars, maxStarsBySample)
 }
 
 export function StarRating({ stars, size = 14 }) {
@@ -144,6 +291,22 @@ export function DataProvider({ children }) {
 
     useEffect(() => { loadData() }, [])
 
+    const normalizeRosterUpdates = useCallback((currentRecord, updates) => {
+        const touchesRosterShape = ['battingOrder', 'positions', 'playerPositions'].some(key =>
+            Object.prototype.hasOwnProperty.call(updates || {}, key)
+        )
+
+        if (!touchesRosterShape) return updates
+
+        const normalized = normalizeRosterRecord({ ...(currentRecord || {}), ...(updates || {}) }, players)
+        return {
+            ...updates,
+            battingOrder: normalized.battingOrder || [],
+            positions: normalized.positions,
+            playerPositions: normalized.playerPositions,
+        }
+    }, [players])
+
     const loadData = async () => {
         try {
             await apiHealth()
@@ -164,8 +327,8 @@ export function DataProvider({ children }) {
                 apiPlayers.getAll(), apiLineups.getAll(), apiGames.getAll(),
             ])
             setPlayers(p)
-            setLineups(l)
-            setGames(g)
+            setLineups((l || []).map(lineup => normalizeRosterRecord(lineup, p)))
+            setGames((g || []).map(game => normalizeRosterRecord(game, p)))
         } catch (err) {
             console.warn('API not available, using localStorage:', err.message)
             setDbReady(false)
@@ -173,9 +336,10 @@ export function DataProvider({ children }) {
                 const saved = localStorage.getItem(STORAGE_KEY)
                 if (saved) {
                     const data = JSON.parse(saved)
-                    setPlayers(data.players || [])
-                    setLineups(data.lineups || [])
-                    setGames(data.games || [])
+                    const localPlayers = data.players || []
+                    setPlayers(localPlayers)
+                    setLineups((data.lineups || []).map(lineup => normalizeRosterRecord(lineup, localPlayers)))
+                    setGames((data.games || []).map(game => normalizeRosterRecord(game, localPlayers)))
                 }
             } catch (e) { console.error('Error loading localStorage:', e) }
         } finally {
@@ -265,7 +429,7 @@ export function DataProvider({ children }) {
                 if (type === 'strikeout') s.strikeouts++
                 if (['single', 'double', 'triple', 'homerun', 'strikeout', 'groundout', 'flyout', 'popout', 'reached_error'].includes(type)) s.atBats++
 
-                if (type === 'run') s.runs++
+                if (type === 'run' || type === 'homerun') s.runs++
                 if (type === 'rbi') s.rbi++
                 if (type === 'stolenbase') s.stolenBases++
                 if (type === 'fielding_error') s.errors++
@@ -300,27 +464,40 @@ export function DataProvider({ children }) {
     // ================== LINEUP CRUD ==================
 
     const addLineup = async (data) => {
+        const payload = normalizeRosterRecord({
+            name: '',
+            date: new Date().toISOString().split('T')[0],
+            opponent: '',
+            positions: {},
+            playerPositions: {},
+            battingOrder: [],
+            ...data,
+        }, players)
+
         try {
             if (dbReady) {
-                const l = await apiLineups.create(data)
+                const l = normalizeRosterRecord(await apiLineups.create(payload), players)
                 setLineups(prev => [l, ...prev]); return l
             }
         } catch (err) {
             console.warn('Firebase lineup create failed, saving locally:', err.message)
         }
-        const l = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), name: '', date: new Date().toISOString().split('T')[0], opponent: '', positions: {}, battingOrder: [], ...data }
+        const l = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), ...payload }
         const nl = [...lineups, l]; setLineups(nl); saveLocal(undefined, nl); return l
     }
 
     const updateLineup = async (id, updates) => {
+        const currentLineup = lineups.find(lineup => lineup.id === id)
+        const normalizedUpdates = normalizeRosterUpdates(currentLineup, updates)
+
         try {
             if (dbReady) {
-                const u = await apiLineups.update(id, updates)
+                const u = normalizeRosterRecord(await apiLineups.update(id, normalizedUpdates), players)
                 setLineups(prev => prev.map(l => l.id === id ? u : l))
                 return
             }
         } catch (err) { console.warn('Firebase lineup update failed, saving locally:', err.message) }
-        const nl = lineups.map(l => l.id === id ? { ...l, ...updates } : l); setLineups(nl); saveLocal(undefined, nl)
+        const nl = lineups.map(l => l.id === id ? normalizeRosterRecord({ ...l, ...normalizedUpdates }, players) : l); setLineups(nl); saveLocal(undefined, nl)
     }
 
     const deleteLineup = async (id) => {
@@ -333,25 +510,42 @@ export function DataProvider({ children }) {
     // ================== GAME CRUD ==================
 
     const addGame = async (data) => {
+        const payload = normalizeRosterRecord({
+            runsFor: 0,
+            runsAgainst: 0,
+            lineupId: null,
+            notes: '',
+            events: [],
+            innings: 7,
+            battingOrder: [],
+            currentBatterIndex: 0,
+            positions: {},
+            playerPositions: {},
+            ...data,
+        }, players)
+
         try {
             if (dbReady) {
-                const g = await apiGames.create(data)
+                const g = normalizeRosterRecord(await apiGames.create(payload), players)
                 setGames(prev => [g, ...prev]); return g
             }
         } catch (err) { console.warn('Firebase game create failed, saving locally:', err.message) }
-        const g = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), date: new Date().toISOString().split('T')[0], opponent: '', runsFor: 0, runsAgainst: 0, lineupId: null, notes: '', events: [], innings: 7, battingOrder: [], currentBatterIndex: 0, ...data }
+        const g = { id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9), createdAt: new Date().toISOString(), ...payload }
         const ng = [...games, g]; setGames(ng); saveLocal(undefined, undefined, ng); return g
     }
 
     const updateGame = async (id, updates) => {
+        const currentGame = games.find(game => game.id === id)
+        const normalizedUpdates = normalizeRosterUpdates(currentGame, updates)
+
         try {
             if (dbReady) {
-                const u = await apiGames.update(id, updates)
+                const u = normalizeRosterRecord(await apiGames.update(id, normalizedUpdates), players)
                 setGames(prev => prev.map(g => g.id === id ? u : g))
                 return
             }
         } catch (err) { console.warn('Firebase game update failed, saving locally:', err.message) }
-        const ng = games.map(g => g.id === id ? { ...g, ...updates } : g); setGames(ng); saveLocal(undefined, undefined, ng)
+        const ng = games.map(g => g.id === id ? normalizeRosterRecord({ ...g, ...normalizedUpdates }, players) : g); setGames(ng); saveLocal(undefined, undefined, ng)
     }
 
     const deleteGame = async (id) => {
@@ -365,7 +559,7 @@ export function DataProvider({ children }) {
         try {
             if (dbReady) {
                 const ug = await apiGames.addEvent(gameId, eventData)
-                setGames(prev => prev.map(g => g.id === gameId ? ug : g))
+                setGames(prev => prev.map(g => g.id === gameId ? normalizeRosterRecord(ug, players) : g))
                 const fp = await apiPlayers.getAll()
                 setPlayers(fp)
                 return ug
@@ -387,7 +581,7 @@ export function DataProvider({ children }) {
         try {
             if (dbReady) {
                 const ug = await apiGames.deleteEvent(gameId, eventId)
-                setGames(prev => prev.map(g => g.id === gameId ? ug : g))
+                setGames(prev => prev.map(g => g.id === gameId ? normalizeRosterRecord(ug, players) : g))
                 const fp = await apiPlayers.getAll()
                 setPlayers(fp)
                 return ug
