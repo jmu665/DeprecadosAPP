@@ -1,11 +1,18 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 export default function Modal({ isOpen, onClose, title, children }) {
-    if (!isOpen) return null
+    const [mounted, setMounted] = useState(false)
 
-    return (
-        <div className="modal-overlay" onClick={onClose}>
+    useEffect(() => {
+        setMounted(true)
+    }, [])
+
+    if (!isOpen || !mounted) return null
+
+    return createPortal(
+        <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
             <div className="modal-content" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-5">
                     <h3 className="text-lg font-bold text-white">{title}</h3>
@@ -18,6 +25,7 @@ export default function Modal({ isOpen, onClose, title, children }) {
                 </div>
                 {children}
             </div>
-        </div>
+        </div>,
+        document.body
     )
 }

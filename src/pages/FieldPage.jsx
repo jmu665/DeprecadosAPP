@@ -7,6 +7,7 @@ import { Save, RotateCcw, Star, Users, Lightbulb, Crown, ArrowRightLeft, Calenda
 export default function FieldPage() {
     const { players, lineups, games, addLineup, getPlayer } = useData()
     const [positions, setPositions] = useState({})
+    const [battingOrder, setBattingOrder] = useState([])
     const [selectedPos, setSelectedPos] = useState(null)
     const [lineupName, setLineupName] = useState('')
     const [lineupDate, setLineupDate] = useState(new Date().toISOString().split('T')[0])
@@ -170,34 +171,66 @@ export default function FieldPage() {
     }
 
     const handleAssignPlayer = (playerId) => {
-        setPositions(prev => ({ ...prev, [selectedPos]: playerId }))
+        setPositions(prev => {
+            const oldPlayerId = prev[selectedPos]
+            const nextPositions = { ...prev, [selectedPos]: playerId }
+            
+            setBattingOrder(prevOrder => {
+                let newOrder = [...prevOrder]
+                if (oldPlayerId && oldPlayerId !== playerId) {
+                    if (!Object.values(nextPositions).includes(oldPlayerId)) {
+                        newOrder = newOrder.filter(id => id !== oldPlayerId)
+                    }
+                }
+                if (!newOrder.includes(playerId)) {
+                    newOrder.push(playerId)
+                }
+                return newOrder
+            })
+            return nextPositions
+        })
         setShowPlayerSelect(false)
         setSelectedPos(null)
     }
 
     const handleRemoveFromPosition = (posId) => {
         setPositions(prev => {
-            const next = { ...prev }
-            delete next[posId]
-            return next
+            const playerId = prev[posId]
+            const nextPositions = { ...prev }
+            delete nextPositions[posId]
+            
+            if (playerId && !Object.values(nextPositions).includes(playerId)) {
+                setBattingOrder(prevOrder => prevOrder.filter(id => id !== playerId))
+            }
+            return nextPositions
         })
+    }
+
+    const changeBattingOrderPosition = (oldIndex, newIndex) => {
+        if (oldIndex === newIndex) return;
+        setBattingOrder(prev => {
+            const next = [...prev];
+            const [movedPlayer] = next.splice(oldIndex, 1);
+            next.splice(newIndex, 0, movedPlayer);
+            return next;
+        });
     }
 
     const handleReset = () => {
         setPositions({})
+        setBattingOrder([])
         setLineupName('')
         setOpponent('')
         setSaved(false)
     }
 
     const handleSaveLineup = () => {
-        const battingOrder = Object.values(positions)
         addLineup({
             name: lineupName || `Lineup ${lineups.length + 1}`,
             date: lineupDate,
             opponent,
             positions,
-            battingOrder,
+            battingOrder: battingOrder,
         })
         setSaved(true)
         setTimeout(() => setSaved(false), 3000)
@@ -205,10 +238,12 @@ export default function FieldPage() {
 
     const applyStellarLineup = () => {
         setPositions(stellarLineup)
+        setBattingOrder(Object.values(stellarLineup))
     }
 
     const applyEveryonePlays = () => {
         setPositions(everyonePlaysLineup)
+        setBattingOrder(Object.values(everyonePlaysLineup))
     }
 
     // ===== GAME LINEUP FIELD COMPONENT (read-only view) =====
@@ -804,6 +839,61 @@ export default function FieldPage() {
                                     </div>
                                 )
                             })()}
+
+                            {/* Batting Order */}
+                            {battingOrder.length > 0 && (
+                                <div className="mt-8">
+                                    <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted mb-3 flex items-center gap-2">
+                                        <Users size={14} /> Orden al Bat ({battingOrder.length})
+                                    </h2>
+                                    <div className="space-y-2">
+                                        {battingOrder.map((playerId, idx) => {
+                                            const player = getPlayer(playerId)
+                                            if (!player) return null
+                                            const posId = Object.keys(positions).find(k => positions[k] === playerId) || 'Banca'
+                                            const posInfo = POSITIONS.find(p => p.id === posId)
+
+                                            return (
+                                                <div key={playerId} className="glass-card p-2 flex items-center gap-3 relative group overflow-hidden">
+                                                    {/* Selector de número al bat */}
+                                                    <div className="shrink-0 relative">
+                                                        <select
+                                                            value={idx}
+                                                            onChange={(e) => changeBattingOrderPosition(idx, parseInt(e.target.value, 10))}
+                                                            className="w-10 h-10 appearance-none rounded-full flex items-center justify-center text-center text-sm font-black bg-primary/15 text-primary cursor-pointer hover:bg-primary/25 transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50"
+                                                            style={{ fontFamily: 'Bebas Neue, sans-serif', paddingLeft: '0.9rem' }}
+                                                            title="Cambiar turno al bat"
+                                                        >
+                                                            {battingOrder.map((_, i) => (
+                                                                <option key={i} value={i} className="bg-surface text-white font-sans font-medium text-sm">
+                                                                    {i + 1}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        {/* Flechita decorativa indicando que es un selector */}
+                                                        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+                                                            <ChevronDown size={10} className="text-primary" />
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {/* Info jugador */}
+                                                    <div className="flex-1 min-w-0 py-1">
+                                                        <div className="text-sm font-medium text-white line-clamp-1">{player.name}</div>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-text-muted">
+                                                                {posInfo?.short || posId}
+                                                            </span>
+                                                            <span className="text-[10px] text-text-muted" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+                                                                #{player.number || '?'} • {formatAvg(calcPlayerAvg(player))}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Bench */}
                             {benchPlayers.length > 0 && Object.keys(positions).length > 0 && (
