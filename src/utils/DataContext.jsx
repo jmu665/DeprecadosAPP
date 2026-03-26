@@ -245,24 +245,15 @@ export function calcPlayerScore(player) {
 export function calcPlayerStars(player) {
     const s = player?.stats || {}
     const ab = s.atBats || 0
-    if (ab < 3) return 0 // Too little data to rate reliably
+    if (ab < 1) return 0
 
-    const score = calcPlayerScore(player)
-    let stars = 1
+    const avg = calcPlayerAvg(player)
 
-    if (score >= 0.38) stars = 5
-    else if (score >= 0.32) stars = 4
-    else if (score >= 0.26) stars = 3
-    else if (score >= 0.20) stars = 2
-
-    // Cap the ceiling until the player has a meaningful sample.
-    const maxStarsBySample =
-        ab >= 25 ? 5 :
-            ab >= 15 ? 4 :
-                ab >= 8 ? 3 :
-                    2
-
-    return Math.min(stars, maxStarsBySample)
+    if (avg > 0.500) return 5
+    if (avg >= 0.400) return 4
+    if (avg >= 0.300) return 3
+    if (avg >= 0.200) return 2
+    return 1
 }
 
 export function StarRating({ stars, size = 14 }) {
